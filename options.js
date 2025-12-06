@@ -17,35 +17,78 @@ let editingProfileId = null;
  * Initialize options page
  */
 async function init() {
-  // Load profiles from storage
-  await loadProfiles();
-  renderProfiles();
-  loadActiveProfileSelection();
+  try {
+    // Load profiles from storage
+    runtimeLog('init() starting');
+    await loadProfiles();
+    runtimeLog(`loaded ${profiles.length} profiles`);
+    renderProfiles();
+    await loadActiveProfileSelection();
+    runtimeLog('active profile selection loaded');
 
-  // Setup event listeners
-  document.getElementById('add-profile-btn').addEventListener('click', addProfile);
-  document.getElementById('fetch-models-btn').addEventListener('click', fetchModels);
-  document.getElementById('active-profile').addEventListener('change', onActiveProfileChanged);
-  document.getElementById('save-profile-selection-btn').addEventListener('click', saveProfileSelection);
-  // OCR buttons
-  const ocrInput = document.getElementById('ocr-url');
-  const ocrOptionsTextarea = document.getElementById('ocr-options');
-  const saveOcrBtn = document.getElementById('save-ocr-btn');
-  const testOcrBtn = document.getElementById('test-ocr-btn');
-  if (ocrInput) {
-    ocrInput.addEventListener('input', (e) => { ocrUrl = e.target.value.trim(); });
+    // Setup event listeners (guard DOM access to avoid script failure)
+    const addProfileBtn = document.getElementById('add-profile-btn');
+    const fetchModelsBtn = document.getElementById('fetch-models-btn');
+    const activeProfileSel = document.getElementById('active-profile');
+    const saveProfileSelectionBtn = document.getElementById('save-profile-selection-btn');
+
+    if (addProfileBtn) addProfileBtn.addEventListener('click', addProfile);
+    if (fetchModelsBtn) fetchModelsBtn.addEventListener('click', fetchModels);
+    if (activeProfileSel) activeProfileSel.addEventListener('change', onActiveProfileChanged);
+    if (saveProfileSelectionBtn) saveProfileSelectionBtn.addEventListener('click', saveProfileSelection);
+
+    // OCR buttons and inputs
+    const ocrInput = document.getElementById('ocr-url');
+    const ocrOptionsTextarea = document.getElementById('ocr-options');
+    const saveOcrBtn = document.getElementById('save-ocr-btn');
+    const testOcrBtn = document.getElementById('test-ocr-btn');
+    if (ocrInput) {
+      // Initialize local var from current value (in case loadProfiles already set it)
+      ocrInput.value = ocrUrl || ocrInput.value || '';
+      ocrInput.addEventListener('input', (e) => { ocrUrl = e.target.value.trim(); runtimeLog('ocr-url input changed: ' + ocrUrl); });
+    }
+    if (ocrOptionsTextarea) {
+      ocrOptionsTextarea.value = ocrOptionsStr || ocrOptionsTextarea.value || '';
+      ocrOptionsTextarea.addEventListener('input', (e) => { ocrOptionsStr = e.target.value; runtimeLog('ocr-options input changed'); });
+    }
+    if (saveOcrBtn) saveOcrBtn.addEventListener('click', saveOcrUrl);
+    if (testOcrBtn) testOcrBtn.addEventListener('click', testOcrEndpoint);
+
+    const exportBtn = document.getElementById('export-profiles-btn');
+    const importBtn = document.getElementById('import-profiles-btn');
+    const importInput = document.getElementById('import-profiles-input');
+    if (exportBtn) exportBtn.addEventListener('click', exportProfiles);
+    if (importBtn) importBtn.addEventListener('click', () => importInput && importInput.click());
+    if (importInput) importInput.addEventListener('change', handleImportFile);
+    const clearLogBtn = document.getElementById('clear-log-btn');
+    if (clearLogBtn) clearLogBtn.addEventListener('click', () => { clearRuntimeLog(); runtimeLog('log cleared'); });
+  } catch (err) {
+    console.error('Init error in options page:', err);
+    try { showError('Options failed to initialize: ' + (err && err.message ? err.message : String(err))); } catch (e) { /* ignore */ }
   }
-  if (ocrOptionsTextarea) {
-    ocrOptionsTextarea.addEventListener('input', (e) => { ocrOptionsStr = e.target.value; });
+}
+
+/**
+ * Append a runtime log entry both to console and the UI log panel (if present)
+ */
+function runtimeLog(message, level = 'info') {
+  try {
+    const ts = new Date().toISOString();
+    const text = `[${ts}] ${message}`;
+    if (level === 'error') console.error(text); else console.log(text);
+    const el = document.getElementById('runtime-log');
+    if (el) {
+      el.textContent = (el.textContent ? el.textContent + '\n' : '') + text;
+      // keep scroll at bottom
+      el.scrollTop = el.scrollHeight;
+    }
+  } catch (e) {
+    // ignore logging failures
   }
-  if (saveOcrBtn) saveOcrBtn.addEventListener('click', saveOcrUrl);
-  if (testOcrBtn) testOcrBtn.addEventListener('click', testOcrEndpoint);
-  const exportBtn = document.getElementById('export-profiles-btn');
-  const importBtn = document.getElementById('import-profiles-btn');
-  const importInput = document.getElementById('import-profiles-input');
-  if (exportBtn) exportBtn.addEventListener('click', exportProfiles);
-  if (importBtn) importBtn.addEventListener('click', () => importInput && importInput.click());
-  if (importInput) importInput.addEventListener('change', handleImportFile);
+}
+
+function clearRuntimeLog() {
+  try { const el = document.getElementById('runtime-log'); if (el) el.textContent = ''; } catch (e) {}
 }
 
 /**
@@ -55,6 +98,7 @@ async function loadProfiles() {
   try {
     const result = await chrome.storage.sync.get('profiles');
     profiles = result.profiles || [];
+    runtimeLog(`loadProfiles: found ${profiles.length} profiles in storage`);
   } catch (error) {
     console.error('Error loading profiles:', error);
     profiles = [];
@@ -70,6 +114,7 @@ async function loadProfiles() {
     ocrOptionsStr = r3.ocrOptions || '';
     const ocrOptionsTextarea = document.getElementById('ocr-options');
     if (ocrOptionsTextarea) ocrOptionsTextarea.value = ocrOptionsStr;
+    runtimeLog('loadProfiles: ocrUrl and ocrOptions loaded from storage');
   } catch (e) {
     console.warn('Failed to load ocrUrl:', e);
   }
@@ -81,6 +126,7 @@ async function loadProfiles() {
 async function saveProfiles() {
   try {
     await chrome.storage.sync.set({ profiles: profiles });
+    runtimeLog('saveProfiles: profiles saved to storage (' + profiles.length + ')');
   } catch (error) {
     showError(`Failed to save profiles: ${error.message}`);
   }
@@ -93,6 +139,7 @@ async function addProfile() {
   const profileName = document.getElementById('profile-name').value.trim();
   const profileUrl = document.getElementById('profile-url').value.trim();
   const systemPrompt = document.getElementById('profile-system-prompt').value.trim();
+  runtimeLog(`addProfile: attempt name='${profileName}' url='${profileUrl}'`);
 
   if (!profileName) {
     showError('Please enter a profile name');
@@ -147,6 +194,7 @@ async function addProfile() {
       profiles.push(newProfile);
     }
     await saveProfiles();
+    runtimeLog(`addProfile: saved profiles (total ${profiles.length})`);
 
     // Clear inputs
     document.getElementById('profile-name').value = '';
@@ -247,6 +295,7 @@ function renderProfiles() {
 
     profilesItems.appendChild(profileCard);
   });
+  runtimeLog('renderProfiles: rendered ' + profiles.length + ' profiles');
 }
 
 /**
@@ -263,6 +312,7 @@ function exportProfiles() {
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+  runtimeLog('exportProfiles: exported ' + profiles.length + ' profiles');
 }
 
 /**
@@ -303,6 +353,7 @@ function handleImportFile(e) {
         renderProfiles();
         loadActiveProfileSelection();
         showStatus(`Imported ${added} profiles, skipped ${skipped}`);
+        runtimeLog(`handleImportFile: imported ${added}, skipped ${skipped}`);
         clearMessages();
       });
     } catch (err) {
@@ -378,19 +429,23 @@ async function fetchModels() {
     return;
   }
 
+  runtimeLog('fetchModels: starting for profile ' + currentSelectedProfile);
   showTestLoading();
 
   try {
     // Construct API URL for fetching tags/models
     const tagsUrl = `${profile.url}/api/tags`;
     
+    // Use AbortController to implement a timeout for fetch
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
     const response = await fetch(tagsUrl, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json'
       },
-      timeout: 8000
-    });
+      signal: controller.signal
+    }).finally(() => clearTimeout(timeoutId));
 
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -410,6 +465,7 @@ async function fetchModels() {
       showTestResult('error', {
         error: 'No models found on this server'
       });
+      runtimeLog('fetchModels: no models found');
       return;
     }
 
@@ -428,10 +484,12 @@ async function fetchModels() {
         models: models
       }
     });
+    runtimeLog('fetchModels: fetched ' + models.length + ' models');
   } catch (error) {
     showTestResult('error', {
       error: `Failed to fetch models: ${error.message}`
     });
+    runtimeLog('fetchModels: error - ' + error.message, 'error');
   }
 }
 
@@ -508,6 +566,7 @@ async function saveOcrUrl() {
     }
 
     await chrome.storage.sync.set({ ocrUrl: ocrUrl, ocrOptions: ocrOptionsStr });
+    runtimeLog('saveOcrUrl: saved ocrUrl and ocrOptions');
     showStatus('✓ OCR settings saved!');
     clearMessages();
   } catch (error) {
@@ -527,6 +586,7 @@ async function testOcrEndpoint() {
   const elem = document.getElementById('test-result');
   elem.style.display = 'block';
   elem.innerHTML = '<p>Testing OCR endpoint...</p>';
+  runtimeLog('testOcrEndpoint: testing ' + ocrUrl);
 
   try {
     const resp = await fetch(ocrUrl, { method: 'GET' });
