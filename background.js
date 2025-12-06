@@ -425,7 +425,6 @@ async function sendToApi(config, data) {
 
     // If we have a readable stream, parse it line-by-line
     if (response.body && (contentType.includes('application/x-ndjson') || contentType.includes('text/event-stream') || contentType.includes('text/plain') || response.headers.get('transfer-encoding') === 'chunked')) {
-    if (response.body && (contentType.includes('application/x-ndjson') || contentType.includes('text/event-stream') || contentType.includes('text/plain') || response.headers.get('transfer-encoding') === 'chunked')) {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
