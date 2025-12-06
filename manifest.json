@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "API Text & Screenshot Sender",
+  "version": "1.0.0",
+  "description": "Send selected text, all visible text, or screenshots to a configurable REST API endpoint",
+  "permissions": [
+    "contextMenus",
+    "storage",
+    "scripting",
+    "activeTab",
+    "tabCapture"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["chat-panel.js", "content.js"],
+      "all_frames": true
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "API Text & Screenshot Sender"
+  },
+  "options_page": "options.html",
+  "icons": {
+    "16": "images/icon-16.png",
+    "48": "images/icon-48.png",
+    "128": "images/icon-128.png"
+  }
+}

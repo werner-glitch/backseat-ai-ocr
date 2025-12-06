@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Sender - Options</title>
+    <link rel="stylesheet" href="options.css">
+</head>
+<body>
+    <div class="options-container">
+        <h1>API Sender Options</h1>
+
+        <!-- Server Profiles Section -->
+        <div class="option-section">
+            <h2>Server Profiles</h2>
+            <div class="profiles-container">
+                <div class="form-group">
+                    <label for="profile-name">Profile Name:</label>
+                    <input 
+                        type="text" 
+                        id="profile-name" 
+                        placeholder="e.g., Local Ollama, OpenAI API"
+                        class="form-input"
+                    >
+                </div>
+
+                <div class="form-group">
+                    <label for="profile-url">Server URL:</label>
+                    <input 
+                        type="url" 
+                        id="profile-url" 
+                        placeholder="http://localhost:11434"
+                        class="form-input"
+                    >
+                    <p class="help-text">
+                        Enter the base server URL (without /api/... path).
+                        <br>
+                        <strong>Example:</strong> <code>http://localhost:11434</code>
+                    </p>
+                </div>
+
+                <div class="button-row">
+                    <button id="add-profile-btn" class="btn btn-primary">Add Profile</button>
+                    <button id="fetch-models-btn" class="btn btn-secondary">Fetch Models</button>
+                </div>
+            </div>
+
+            <!-- Existing Profiles List -->
+            <div id="profiles-list" class="profiles-list" style="display: none;">
+                <h3>Your Profiles</h3>
+                <div id="profiles-items"></div>
+            </div>
+        </div>
+
+        <!-- Active Profile & Model Selection -->
+        <div class="option-section">
+            <h2>Active Server & Model</h2>
+            <div class="form-group">
+                <label for="active-profile">Select Active Profile:</label>
+                <select id="active-profile" class="form-select">
+                    <option value="">-- No profile selected --</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="selected-model">Select Model:</label>
+                <select id="selected-model" class="form-select">
+                    <option value="">-- Fetch models from server --</option>
+                </select>
+                <p class="help-text" id="model-help">
+                    Select a profile and click "Fetch Models" to populate this list.
+                </p>
+            </div>
+
+            <button id="save-profile-selection-btn" class="btn btn-primary">Save Selection</button>
+        </div>
+
+        <!-- Data Format Section -->
+        <div class="option-section">
+            <h2>Data Format</h2>
+            <p>The extension sends data in the following JSON format:</p>
+            <pre><code>{
+  "type": "selected_text|all_text|screenshot",
+  "content": "...",
+  "model": "selected-model-name",
+  "pageUrl": "https://example.com",
+  "pageTitle": "Page Title",
+  "timestamp": "2024-01-01T12:00:00.000Z"
+}</code></pre>
+        </div>
+
+        <!-- Usage Section -->
+        <div class="option-section">
+            <h2>Usage</h2>
+            <ul>
+                <li><strong>Add Profile:</strong> Enter profile name and server URL, click "Add Profile"</li>
+                <li><strong>Fetch Models:</strong> Click to fetch available models from the selected server</li>
+                <li><strong>Select Model:</strong> Choose the model to use from the dropdown</li>
+                <li><strong>Send Selected Text:</strong> Right-click selected text and choose "Send Selected Text to API"</li>
+                <li><strong>Send All Text:</strong> Right-click any page and select "Send All Visible Text to API"</li>
+                <li><strong>Send Screenshot:</strong> Right-click any page and select "Send Screenshot to API"</li>
+            </ul>
+        </div>
+
+        <!-- Status/Error Messages -->
+        <div id="status-message" class="status-message" style="display: none;"></div>
+        <div id="error-message" class="error-message" style="display: none;"></div>
+        <div id="test-result" class="test-result" style="display: none;"></div>
+    </div>
+
+    <script src="options.js"></script>
+</body>
+</html>
