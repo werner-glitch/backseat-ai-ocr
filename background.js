@@ -211,20 +211,55 @@ async function sendImageToOcr(ocrUrl, dataUrl) {
     }
 
     const json = await resp.json();
-    if (json && typeof json.text === 'string') {
-      return { success: true, text: json.text };
+
+    // Use unified extractor to find OCR text in many possible response shapes
+    const extracted = extractOcrText(json);
+    if (extracted && typeof extracted === 'string' && extracted.trim().length > 0) {
+      return { success: true, text: extracted };
     }
 
-    // Some OCR servers may return other shapes
-    if (json && (json.result || json.data || json.output)) {
-      const fallback = json.text || json.result || json.data || json.output;
-      if (typeof fallback === 'string') return { success: true, text: fallback };
-    }
-
-    return { success: false, error: 'OCR did not return a text field' };
+    // If no useful text found, return a success with empty text and a flag
+    return { success: true, text: '', warning: 'Kein OCR-Ergebnis, bitte Screenshot erneut versuchen' };
   } catch (error) {
     return { success: false, error: error.message };
   }
+}
+
+/**
+ * Extract OCR text from various possible OCR server JSON shapes.
+ * Priority: json.text -> json.data.stdout -> json.stdout -> json.result -> json.output -> first long string field (>10)
+ * @param {object} json
+ * @returns {string} extracted text or empty string
+ */
+function extractOcrText(json) {
+  if (!json || typeof json !== 'object') return '';
+
+  if (typeof json.text === 'string' && json.text.trim().length > 0) return json.text.trim();
+
+  if (json.data && typeof json.data === 'object') {
+    if (typeof json.data.stdout === 'string' && json.data.stdout.trim().length > 0) return json.data.stdout.trim();
+  }
+
+  if (typeof json.stdout === 'string' && json.stdout.trim().length > 0) return json.stdout.trim();
+  if (typeof json.result === 'string' && json.result.trim().length > 0) return json.result.trim();
+  if (typeof json.output === 'string' && json.output.trim().length > 0) return json.output.trim();
+
+  // Backup: first "long" string field at root
+  try {
+    for (const val of Object.values(json)) {
+      if (typeof val === 'string' && val.trim().length > 10) return val.trim();
+      // also support nested single-level objects like { something: { text: '...' } }
+      if (val && typeof val === 'object') {
+        for (const v2 of Object.values(val)) {
+          if (typeof v2 === 'string' && v2.trim().length > 10) return v2.trim();
+        }
+      }
+    }
+  } catch (e) {
+    // ignore
+  }
+
+  return '';
 }
 
 /**
@@ -269,8 +304,17 @@ async function sendToApi(config, data) {
             const ocrResult = await sendImageToOcr(config.ocrUrl, data.content);
             if (ocrResult.success && ocrResult.text) {
               promptParts.push(`Content (from OCR):\n${ocrResult.text}`);
+            } else if (ocrResult.success && (!ocrResult.text || ocrResult.text.trim() === '')) {
+              // OCR returned no text -> inform the user in the chat panel instead of calling the model
+              const hint = (ocrResult.warning) ? ocrResult.warning : 'Kein OCR-Ergebnis, bitte Screenshot erneut versuchen';
+              return {
+                success: true,
+                status: 200,
+                data: { assembled: hint },
+                timestamp: new Date().toISOString()
+              };
             } else {
-              // OCR failed: fall back to indicating screenshot provided
+              // OCR failed with an error
               promptParts.push(`[Screenshot provided; OCR failed: ${ocrResult.error || 'unknown'}]`);
             }
           } catch (e) {
