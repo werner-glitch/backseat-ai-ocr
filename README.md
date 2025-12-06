@@ -85,6 +85,11 @@ Die benutzerdefinierte Höhe wird lokal im Browser gespeichert, sodass Ihre bevo
 
 ## Usage
 
+📁 **Profile (Persona) Management**
+- Create profiles that include a **Name** and an optional **System Prompt** (assistant persona / system instruction).
+- Select a profile as active; the profile's system prompt is sent with chat requests so the assistant adopts that persona.
+- Export and import profiles as JSON for backup or sharing.
+
 ### Setup Server Profiles
 
 1. **Open Extension Options**
@@ -196,6 +201,12 @@ The extension sends POST requests to your API with the following JSON structure:
   "type": "selected_text_with_question|all_text_with_question|screenshot_with_question",
   "question": "What is this about?",
   "content": "...",
+**For Chat Panel Requests:**
+{
+   "type": "selected_text_with_question|all_text_with_question|screenshot_with_question",
+   "question": "What is this about?",
+   "content": "...",
+   "systemPrompt": "Optional system prompt text from selected profile",
   "model": "selected-model-name",
   "pageUrl": "https://example.com",
   "pageTitle": "Page Title",

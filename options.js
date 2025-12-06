@@ -11,6 +11,7 @@ let currentSelectedProfile = null;
 let availableModels = [];
 let ocrUrl = '';
 let ocrOptionsStr = '';
+let editingProfileId = null;
 
 /**
  * Initialize options page
@@ -39,6 +40,12 @@ async function init() {
   }
   if (saveOcrBtn) saveOcrBtn.addEventListener('click', saveOcrUrl);
   if (testOcrBtn) testOcrBtn.addEventListener('click', testOcrEndpoint);
+  const exportBtn = document.getElementById('export-profiles-btn');
+  const importBtn = document.getElementById('import-profiles-btn');
+  const importInput = document.getElementById('import-profiles-input');
+  if (exportBtn) exportBtn.addEventListener('click', exportProfiles);
+  if (importBtn) importBtn.addEventListener('click', () => importInput && importInput.click());
+  if (importInput) importInput.addEventListener('change', handleImportFile);
 }
 
 /**
@@ -85,6 +92,7 @@ async function saveProfiles() {
 async function addProfile() {
   const profileName = document.getElementById('profile-name').value.trim();
   const profileUrl = document.getElementById('profile-url').value.trim();
+  const systemPrompt = document.getElementById('profile-system-prompt').value.trim();
 
   if (!profileName) {
     showError('Please enter a profile name');
@@ -101,28 +109,49 @@ async function addProfile() {
     const url = new URL(profileUrl);
     // Normalize URL (remove trailing slash)
     const normalizedUrl = url.origin + url.pathname.replace(/\/$/, '');
-    
-    // Check if profile already exists
-    if (profiles.some(p => p.url === normalizedUrl)) {
-      showError('This profile URL already exists');
+
+    // Check for duplicate profile name
+    if (profiles.some(p => p.name.toLowerCase() === profileName.toLowerCase() && p.id !== editingProfileId)) {
+      showError('A profile with this name already exists');
       return;
     }
 
-    // Add new profile
-    const newProfile = {
-      id: Date.now().toString(),
-      name: profileName,
-      url: normalizedUrl,
-      models: [],
-      createdAt: new Date().toISOString()
-    };
+    if (editingProfileId) {
+      // update existing
+      const idx = profiles.findIndex(p => p.id === editingProfileId);
+      if (idx !== -1) {
+        profiles[idx].name = profileName;
+        profiles[idx].url = normalizedUrl;
+        profiles[idx].systemPrompt = systemPrompt || '';
+        profiles[idx].updatedAt = new Date().toISOString();
+      }
+      editingProfileId = null;
+      document.getElementById('add-profile-btn').textContent = 'Add Profile';
+    } else {
+      // Check if profile URL exists
+      if (profiles.some(p => p.url === normalizedUrl)) {
+        showError('This profile URL already exists');
+        return;
+      }
 
-    profiles.push(newProfile);
+      // Add new profile
+      const newProfile = {
+        id: Date.now().toString(),
+        name: profileName,
+        url: normalizedUrl,
+        models: [],
+        systemPrompt: systemPrompt || '',
+        createdAt: new Date().toISOString()
+      };
+
+      profiles.push(newProfile);
+    }
     await saveProfiles();
 
     // Clear inputs
     document.getElementById('profile-name').value = '';
     document.getElementById('profile-url').value = '';
+    document.getElementById('profile-system-prompt').value = '';
 
     // Update UI
     renderProfiles();
@@ -132,6 +161,19 @@ async function addProfile() {
   } catch (error) {
     showError('Invalid URL format. Please enter a valid server URL.');
   }
+}
+
+/**
+ * Edit profile - populate the form for editing
+ */
+function editProfile(profileId) {
+  const prof = profiles.find(p => p.id === profileId);
+  if (!prof) return;
+  document.getElementById('profile-name').value = prof.name || '';
+  document.getElementById('profile-url').value = prof.url || '';
+  document.getElementById('profile-system-prompt').value = prof.systemPrompt || '';
+  editingProfileId = prof.id;
+  document.getElementById('add-profile-btn').textContent = 'Save Profile';
 }
 
 /**
@@ -191,6 +233,7 @@ function renderProfiles() {
         <div class="profile-status">${statusText}</div>
       </div>
       <div class="profile-actions">
+        <button class="profile-action-btn profile-edit-btn" data-id="${profile.id}">Edit</button>
         <button class="profile-action-btn profile-delete-btn" data-id="${profile.id}">Delete</button>
       </div>
     `;
@@ -198,9 +241,75 @@ function renderProfiles() {
     profileCard.querySelector('.profile-delete-btn').addEventListener('click', (e) => {
       deleteProfile(e.target.dataset.id);
     });
+    profileCard.querySelector('.profile-edit-btn').addEventListener('click', (e) => {
+      editProfile(e.target.dataset.id);
+    });
 
     profilesItems.appendChild(profileCard);
   });
+}
+
+/**
+ * Export profiles to a JSON file for import elsewhere
+ */
+function exportProfiles() {
+  const data = JSON.stringify(profiles, null, 2);
+  const blob = new Blob([data], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'profiles.json';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * Handle import file selection
+ */
+function handleImportFile(e) {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+  if (file.size > 2000000) { // 2MB limit
+    showError('Import file too large (max 2MB)');
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    try {
+      const parsed = JSON.parse(ev.target.result);
+      if (!Array.isArray(parsed)) {
+        showError('Import file must be an array of profiles');
+        return;
+      }
+      // validate and merge
+      let added = 0, skipped = 0;
+      parsed.forEach(p => {
+        if (!p || typeof p.name !== 'string' || !p.name.trim()) { skipped++; return; }
+        if (profiles.some(existing => existing.name.toLowerCase() === p.name.trim().toLowerCase())) { skipped++; return; }
+        const newP = {
+          id: Date.now().toString() + Math.floor(Math.random()*1000),
+          name: p.name.trim(),
+          url: (p.url||'').trim(),
+          models: p.models || [],
+          systemPrompt: p.systemPrompt || '',
+          createdAt: new Date().toISOString()
+        };
+        profiles.push(newP);
+        added++;
+      });
+      saveProfiles().then(() => {
+        renderProfiles();
+        loadActiveProfileSelection();
+        showStatus(`Imported ${added} profiles, skipped ${skipped}`);
+        clearMessages();
+      });
+    } catch (err) {
+      showError('Failed to parse import file: ' + err.message);
+    }
+  };
+  reader.readAsText(file);
 }
 
 /**

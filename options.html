@@ -25,6 +25,12 @@
                 </div>
 
                 <div class="form-group">
+                    <label for="profile-system-prompt">System Prompt (Profile)</label>
+                    <textarea id="profile-system-prompt" class="form-input" rows="3" placeholder="Describe the assistant persona / system prompt"></textarea>
+                    <p class="help-text">Optional: This system prompt will be sent as the profile's system instruction when using the chat panel.</p>
+                </div>
+
+                <div class="form-group">
                     <label for="profile-url">Server URL:</label>
                     <input 
                         type="url" 
@@ -48,7 +54,12 @@
             <!-- Existing Profiles List -->
             <div id="profiles-list" class="profiles-list" style="display: none;">
                 <h3>Your Profiles</h3>
-                <div id="profiles-items"></div>
+                                <div id="profiles-items"></div>
+                                <div class="button-row" style="margin-top:8px;">
+                                    <button id="export-profiles-btn" class="btn btn-secondary">Export Profiles</button>
+                                    <input id="import-profiles-input" type="file" accept="application/json" style="display:none" />
+                                    <button id="import-profiles-btn" class="btn btn-secondary">Import Profiles</button>
+                                </div>
             </div>
         </div>
 

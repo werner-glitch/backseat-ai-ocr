@@ -46,6 +46,7 @@ async function getActiveConfig() {
       profileId: profile.id,
       profileName: profile.name,
       url: profile.url,
+      systemPrompt: profile.systemPrompt || '',
       selectedModel: result.selectedModel
     };
   } catch (error) {

@@ -157,7 +157,8 @@ async function getActiveConfig() {
       url: profile.url,
       selectedModel: result.selectedModel,
       ocrUrl: result.ocrUrl || '',
-      ocrOptions: result.ocrOptions || ''
+      ocrOptions: result.ocrOptions || '',
+      systemPrompt: profile.systemPrompt || ''
     };
   } catch (error) {
     console.error('Error getting active config:', error);
@@ -287,6 +288,12 @@ async function sendToApi(config, data) {
     let promptParts = [];
     
     // Add page context
+    // Prepend system prompt if present
+    if (data.systemPrompt) {
+      promptParts.push(`System Prompt:\n${data.systemPrompt}`);
+    } else if (config.systemPrompt) {
+      promptParts.push(`System Prompt:\n${config.systemPrompt}`);
+    }
     if (data.pageTitle) {
       promptParts.push(`Page Title: ${data.pageTitle}`);
     }

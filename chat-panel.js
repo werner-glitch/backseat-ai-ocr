@@ -27,15 +27,37 @@ class ChatPanel {
     }
 
     this.createPanelHTML();
-    // Load saved custom height (if any)
+    // Load saved custom height (if any) from chrome.storage.sync
     try {
-      const saved = localStorage.getItem('aiChatCustomHeight');
-      if (saved) {
-        const h = parseFloat(saved);
-        if (!Number.isNaN(h) && h > this.COLLAPSED_HEIGHT) {
-          this.customHeight = h;
+      chrome.storage.sync.get(['aiChatCustomHeight', 'activeProfile', 'profiles'], (res) => {
+        try {
+          const saved = res.aiChatCustomHeight;
+          if (saved) {
+            const h = parseFloat(saved);
+            if (!Number.isNaN(h) && h > this.COLLAPSED_HEIGHT) {
+              this.customHeight = h;
+              // apply as custom class so toggle uses it
+              try { this.panelElement.classList.add('ai-chat-panel-custom'); } catch (e) {}
+            }
+          }
+          // populate profile dropdown if available
+          const profiles = res.profiles || [];
+          const active = res.activeProfile || '';
+          const select = document.getElementById('ai-chat-profile-select');
+          if (select && Array.isArray(profiles)) {
+            select.innerHTML = '';
+            profiles.forEach(p => {
+              const opt = document.createElement('option');
+              opt.value = p.id;
+              opt.textContent = p.name;
+              select.appendChild(opt);
+            });
+            if (active) select.value = active;
+          }
+        } catch (e) {
+          // ignore
         }
-      }
+      });
     } catch (e) {
       this.customHeight = null;
     }
@@ -54,7 +76,10 @@ class ChatPanel {
     container.innerHTML = `
       <div id="ai-chat-panel" class="ai-chat-panel ai-chat-panel-closed">
         <div class="ai-chat-header">
-          <h3>Chat with AI</h3>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <h3 style="margin:0;">Chat with AI</h3>
+            <select id="ai-chat-profile-select" style="font-size:12px;padding:4px;border-radius:6px;border:1px solid #ccc;"></select>
+          </div>
           <button id="ai-chat-toggle" class="ai-chat-toggle-btn" title="Toggle chat panel">
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
               <path d="M2 18l1.41-5.02C2.24 11.36 2 10.7 2 10c0-4.42 3.58-8 8-8s8 3.58 8 8-3.58 8-8 8c-1.28 0-2.5-.32-3.56-.93L2 18z" fill="currentColor"/>
@@ -126,6 +151,20 @@ class ChatPanel {
       this.handleScreenshot();
     });
 
+    // Profile select change
+    const profileSelect = document.getElementById('ai-chat-profile-select');
+    if (profileSelect) {
+      profileSelect.addEventListener('change', (e) => {
+        const val = e.target.value;
+        // save active profile to chrome.storage.sync
+        try {
+          chrome.storage.sync.set({ activeProfile: val });
+        } catch (err) {
+          // ignore
+        }
+      });
+    }
+
     // Drag-to-resize via header (mouse + touch)
     const header = this.panelElement.querySelector('.ai-chat-header');
     let startY = 0;
@@ -157,7 +196,7 @@ class ChatPanel {
         const finalH = this.panelElement.offsetHeight;
         if (finalH > this.COLLAPSED_HEIGHT + 4) {
           this.customHeight = finalH;
-          try { localStorage.setItem('aiChatCustomHeight', String(this.customHeight)); } catch (e) {}
+          try { chrome.storage.sync.set({ aiChatCustomHeight: String(this.customHeight) }); } catch (e) {}
           this.panelElement.classList.add('ai-chat-panel-custom');
           this.panelElement.classList.remove('ai-chat-panel-open');
           this.panelElement.classList.remove('ai-chat-panel-closed');
@@ -187,7 +226,7 @@ class ChatPanel {
         const finalH = this.panelElement.offsetHeight;
         if (finalH > this.COLLAPSED_HEIGHT + 4) {
           this.customHeight = finalH;
-          try { localStorage.setItem('aiChatCustomHeight', String(this.customHeight)); } catch (e) {}
+          try { chrome.storage.sync.set({ aiChatCustomHeight: String(this.customHeight) }); } catch (e) {}
           this.panelElement.classList.add('ai-chat-panel-custom');
           this.panelElement.classList.remove('ai-chat-panel-open');
           this.panelElement.classList.remove('ai-chat-panel-closed');
