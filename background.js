@@ -285,6 +285,33 @@ async function sendToApi(config, data) {
     const apiUrl = `${config.url}/api/generate`;
     
     // Build a comprehensive prompt from all available data
+    // If caller supplied a fully assembled prompt, use it directly
+    if (data && typeof data.prompt === 'string' && data.prompt.length > 0) {
+      const requestBodyDirect = {
+        model: config.selectedModel,
+        prompt: data.prompt
+      };
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(requestBodyDirect)
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const jsonResponse = await response.json();
+      return {
+        success: true,
+        status: response.status,
+        data: jsonResponse,
+        timestamp: new Date().toISOString()
+      };
+    }
+
     let promptParts = [];
     
     // Add page context
@@ -544,6 +571,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           timestamp: new Date().toISOString()
         };
 
+        // If assembled prompt provided by caller, pass it along as 'prompt'
+        if (request.assembledPrompt && typeof request.assembledPrompt === 'string') {
+          requestBody.prompt = request.assembledPrompt;
+        }
+
         const response = await sendToApi(config, requestBody);
         sendResponse(response);
       } catch (error) {
@@ -585,5 +617,83 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     })();
     return true; // Keep channel open for async response
   }
+  else if (request.action === 'capture-and-ocr') {
+    (async () => {
+      try {
+        // capture active tab screenshot and run OCR with configured OCR endpoint
+        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (!tabs || tabs.length === 0) {
+          sendResponse({ success: false, error: 'No active tab' });
+          return;
+        }
+        const tab = tabs[0];
+        const canvas = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+        // Retrieve OCR URL from storage
+        const cfg = await getActiveConfig();
+        if (!cfg || !cfg.ocrUrl) {
+          sendResponse({ success: true, screenshot: canvas, ocrText: '', warning: 'No OCR configured' });
+          return;
+        }
+        const ocrResult = await sendImageToOcr(cfg.ocrUrl, canvas);
+        if (ocrResult.success) {
+          sendResponse({ success: true, screenshot: canvas, ocrText: ocrResult.text || '', warning: ocrResult.warning || '' });
+        } else {
+          sendResponse({ success: false, error: ocrResult.error || 'OCR failed' });
+        }
+      } catch (err) {
+        sendResponse({ success: false, error: err.message });
+      }
+    })();
+    return true;
+  }
+  else if (request.action === 'build-prompt') {
+    try {
+      const assembled = buildCombinedPrompt(request.payload || {});
+      sendResponse({ success: true, prompt: assembled });
+    } catch (e) {
+      sendResponse({ success: false, error: e.message });
+    }
+    return true;
+  }
 });
+
+/**
+ * Build combined prompt from collected sections.
+ * Sections: systemPrompt, pageTitle, pageUrl, allText, ocrText, question
+ * If any section missing/empty, substitute 'nicht verfügbar'
+ * Truncate sections to keep total length under maxChars
+ */
+function buildCombinedPrompt({ systemPrompt = '', pageTitle = '', pageUrl = '', allText = '', ocrText = '', question = '' } = {}) {
+  const maxChars = 30000; // overall limit
+
+  const sections = [];
+  if (systemPrompt && systemPrompt.trim()) {
+    sections.push(`${systemPrompt.trim()}`);
+  }
+
+  sections.push(`Seiten-Titel: ${pageTitle && pageTitle.trim() ? pageTitle.trim() : 'nicht verfügbar'}`);
+  sections.push(`Seiten-URL: ${pageUrl && pageUrl.trim() ? pageUrl.trim() : 'nicht verfügbar'}`);
+
+  const cleanedAll = allText && String(allText).trim() ? String(allText).trim() : 'nicht verfügbar';
+  sections.push(`\nGesamter Seitentext (STRG+A):\n${cleanedAll}`);
+
+  const cleanedOcr = ocrText && String(ocrText).trim() ? String(ocrText).trim() : 'nicht verfügbar';
+  sections.push(`\nSichtbarer Bereich (Screenshot, OCR):\n${cleanedOcr}`);
+
+  sections.push(`\nFrage des Nutzers:\n${question && question.trim() ? question.trim() : 'nicht verfügbar'}`);
+
+  // Join and truncate if necessary
+  let prompt = sections.join('\n\n');
+  if (prompt.length > maxChars) {
+    // attempt to truncate large sections: prefer keeping header/context & question
+    const preserve = `Frage des Nutzers:\n${question && question.trim() ? question.trim() : 'nicht verfügbar'}`;
+    // remove from middle - keep first 60% of allowed and add preserve
+    const head = prompt.slice(0, Math.floor(maxChars * 0.6));
+    const tail = '\n\n... [TRUNCATED] ...\n\n' + preserve;
+    prompt = head + tail;
+    if (prompt.length > maxChars) prompt = prompt.slice(0, maxChars);
+  }
+
+  return prompt;
+}
 

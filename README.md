@@ -33,6 +33,34 @@ Der Toggle-Button verhält sich wie folgt:
 
 Die benutzerdefinierte Höhe wird lokal im Browser gespeichert, sodass Ihre bevorzugte Größe auf weiteren Seiten wiederverwendet wird.
 
+### Automatische Quellensammlung & kombinierter Prompt
+
+Beim Senden über das Chat-Panel sammelt die Extension automatisch drei Quellen:
+
+- **Gesamter Seitentext (STRG+A):** Alle kopierbaren sichtbaren Texte der Seite
+- **Screenshot (sichtbarer Bereich) → OCR:** Screenshot des sichtbaren Bereichs wird erfasst und (falls OCR konfiguriert) der erkannte Text verwendet
+- **Seiten-Titel & URL**
+
+Diese Quellen werden im Panel als Vorschau angezeigt. Beim Senden wird ein kombinierter Prompt erzeugt, der alle drei Abschnitte klar trennt und die Nutzerfrage anhängt. Beispielstruktur:
+
+```
+[SYSTEM-PROMPT/Profil]
+
+Seiten-Titel: ...
+Seiten-URL: ...
+
+Gesamter Seitentext (STRG+A):
+...
+
+Sichtbarer Bereich (Screenshot, OCR):
+...
+
+Frage des Nutzers:
+...
+```
+
+Falls ein Bereich nicht verfügbar ist, steht dort `nicht verfügbar`. Große Prompts werden automatisch getrimmt, wobei die Nutzerfrage erhalten bleibt.
+
 🔧 **Multi-Profile Support**
 - Create multiple server profiles (Ollama, local LLMs, public APIs)
 - Switch between profiles instantly

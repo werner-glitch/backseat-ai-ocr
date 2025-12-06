@@ -65,6 +65,19 @@ class ChatPanel {
     this.setupStyles();
     // Sync toggle icon with initial state
     this.updateToggleIconState();
+    // Initial automatic collection of sources for preview
+    try {
+      const t = this.collectTitleAndUrl();
+      const titleElem = document.getElementById('preview-title');
+      const urlElem = document.getElementById('preview-url');
+      if (titleElem) titleElem.textContent = `Seiten-Titel: ${t.title || 'nicht verfügbar'}`;
+      if (urlElem) urlElem.textContent = `Seiten-URL: ${t.url || 'nicht verfügbar'}`;
+      // Kick off async collections
+      this.collectPageText();
+      this.collectScreenshotAndOcr();
+    } catch (e) {
+      // ignore
+    }
   }
 
   /**
@@ -87,6 +100,14 @@ class ChatPanel {
           </button>
         </div>
         <div class="ai-chat-messages" id="ai-chat-messages"></div>
+        <div id="ai-chat-preview" class="ai-chat-preview" style="padding:8px;border-top:1px solid #eee;font-size:12px;max-height:150px;overflow:auto;">
+          <div><strong>Collected sources:</strong></div>
+          <div id="preview-title">Seiten-Titel: -</div>
+          <div id="preview-url">Seiten-URL: -</div>
+          <div id="preview-alltext">Gesamter Seitentext: -</div>
+          <div id="preview-ocr">Screenshot (OCR): -</div>
+          <div style="margin-top:6px;"><button id="refresh-alltext-btn" style="margin-right:6px;">Neu sammeln</button><button id="retry-ocr-btn">OCR neu</button></div>
+        </div>
         <div class="ai-chat-input-group">
           <input 
             type="text" 
@@ -164,6 +185,12 @@ class ChatPanel {
         }
       });
     }
+
+    // Preview refresh buttons
+    const refreshBtn = document.getElementById('refresh-alltext-btn');
+    const retryOcrBtn = document.getElementById('retry-ocr-btn');
+    if (refreshBtn) refreshBtn.addEventListener('click', () => this.collectPageText(true));
+    if (retryOcrBtn) retryOcrBtn.addEventListener('click', () => this.collectScreenshotAndOcr(true));
 
     // Drag-to-resize via header (mouse + touch)
     const header = this.panelElement.querySelector('.ai-chat-header');
@@ -272,11 +299,11 @@ class ChatPanel {
         max-height: 95vh;
         background: white;
         border-radius: 12px 12px 0 0;
-        box-shadow: 0 -2px 16px rgba(0, 0, 0, 0.15);
+        box-shadow: none;
         display: flex;
         flex-direction: column;
         pointer-events: auto;
-        transition: height 0.25s ease-out;
+        transition: height 0s;
         overflow: hidden;
         z-index: 999999;
       }
@@ -295,7 +322,7 @@ class ChatPanel {
         align-items: center;
         padding: 12px 16px;
         border-bottom: 1px solid #e0e0e0;
-        background: #f5f5f5;
+        background: #f9f9f9;
         border-radius: 12px 12px 0 0;
       }
 
@@ -316,11 +343,10 @@ class ChatPanel {
         align-items: center;
         justify-content: center;
         border-radius: 4px;
-        transition: all 0.2s;
       }
 
       .ai-chat-toggle-btn:hover {
-        background: rgba(0, 0, 0, 0.1);
+        background: rgba(0, 0, 0, 0.03);
         color: #1a1a1a;
       }
 
@@ -337,19 +363,9 @@ class ChatPanel {
         display: flex;
         gap: 8px;
         margin-bottom: 4px;
-        animation: fadeIn 0.3s ease-out;
       }
 
-      @keyframes fadeIn {
-        from {
-          opacity: 0;
-          transform: translateY(4px);
-        }
-        to {
-          opacity: 1;
-          transform: translateY(0);
-        }
-      }
+      /* no animations for a simple, accessible UI */
 
       .ai-chat-message.user {
         justify-content: flex-end;
@@ -398,7 +414,6 @@ class ChatPanel {
 
       .ai-chat-input:focus {
         border-color: #007bff;
-        box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.1);
       }
 
       .ai-chat-input:disabled {
@@ -418,28 +433,13 @@ class ChatPanel {
         display: flex;
         align-items: center;
         justify-content: center;
-        transition: all 0.2s;
         font-size: 0;
-      }
-
-      .ai-chat-send-btn:hover:not(:disabled),
-      .ai-chat-screenshot-btn:hover:not(:disabled) {
-        background: #0056b3;
-        transform: translateY(-1px);
       }
 
       .ai-chat-send-btn:disabled,
       .ai-chat-screenshot-btn:disabled {
         background: #ccc;
         cursor: not-allowed;
-      }
-
-      .ai-chat-screenshot-btn {
-        background: #6c757d;
-      }
-
-      .ai-chat-screenshot-btn:hover:not(:disabled) {
-        background: #5a6268;
       }
 
       .ai-chat-footer {
@@ -463,29 +463,13 @@ class ChatPanel {
         height: 6px;
         border-radius: 50%;
         background: #999;
-        animation: typing 0.6s infinite;
-      }
-
-      .ai-chat-typing-dot:nth-child(1) {
-        animation-delay: 0s;
-      }
-
-      .ai-chat-typing-dot:nth-child(2) {
-        animation-delay: 0.2s;
       }
 
       .ai-chat-typing-dot:nth-child(3) {
         animation-delay: 0.4s;
       }
 
-      @keyframes typing {
-        0%, 60%, 100% {
-          transform: translateY(0);
-        }
-        30% {
-          transform: translateY(-8px);
-        }
-      }
+      /* no typing animation for accessibility */
 
       /* Scrollbar styling */
       .ai-chat-messages::-webkit-scrollbar {
@@ -588,47 +572,48 @@ class ChatPanel {
     const question = this.inputField.value.trim();
     if (!question || this.isWaitingForResponse) return;
 
-    // Get selected text or all text
-    let context = '';
-    // Prefer the saved selection (captured before opening) to avoid losing selection on focus
-    const selectedText = (this.savedSelection && this.savedSelection.length > 0) ? this.savedSelection : window.getSelection().toString();
+    // Instead of single context, collect 3 data sources: page text, screenshot OCR, title+url
+    this.showTypingIndicator();
+    this.isWaitingForResponse = true;
+    // collect in parallel where possible
+    const titleUrl = this.collectTitleAndUrl();
+    const pageTextPromise = this.collectPageText();
+    const ocrPromise = this.collectScreenshotAndOcr();
 
-    if (selectedText) {
-      context = selectedText;
-      // clear saved selection after using it
-      this.savedSelection = '';
-    } else {
-      // Get all visible text from page
-      const bodyClone = document.body.cloneNode(true);
-      const scripts = bodyClone.querySelectorAll('script, style, noscript');
-      scripts.forEach(el => el.remove());
-      const allText = bodyClone.innerText || bodyClone.textContent || '';
-      context = allText
-        .split('\n')
-        .map(line => line.trim())
-        .filter(line => line.length > 0)
-        .join('\n')
-        .substring(0, 3000); // Limit to 3000 chars to avoid huge requests
-    }
+    const [allTextRes, ocrRes] = await Promise.all([pageTextPromise, ocrPromise]);
+    const allText = allTextRes && allTextRes.text ? allTextRes.text : '';
+    const ocrText = ocrRes && ocrRes.success ? (ocrRes.ocrText || '') : '';
+    const pageTitle = titleUrl.title || '';
+    const pageUrl = titleUrl.url || '';
 
     // Add user message to chat
     this.addMessage('user', question);
     this.inputField.value = '';
     this.inputField.disabled = true;
-    this.isWaitingForResponse = true;
-
-    // Show typing indicator
-    this.showTypingIndicator();
-
-    // Send to background script
+    // Build combined prompt via background helper to ensure consistent format and truncation
     try {
+      const buildResp = await new Promise((resolve) => {
+        chrome.runtime.sendMessage({ action: 'build-prompt', payload: { pageTitle, pageUrl, allText, ocrText, question } }, resolve);
+      });
+
+      if (!buildResp || !buildResp.success) {
+        this.removeTypingIndicator();
+        this.addMessage('assistant', `Error building prompt: ${buildResp?.error || 'unknown'}`);
+        this.inputField.disabled = false;
+        this.isWaitingForResponse = false;
+        return;
+      }
+
+      const assembledPrompt = buildResp.prompt;
+
+      // Send to background to call API; pass assembled prompt so background can prepend system prompt if needed
       chrome.runtime.sendMessage({
         action: 'send-chat-message',
         question: question,
-        context: context,
-        dataType: selectedText ? 'selected_text_with_question' : 'all_text_with_question',
-        pageUrl: window.location.href,
-        pageTitle: document.title
+        assembledPrompt: assembledPrompt,
+        dataType: 'combined_prompt',
+        pageUrl: pageUrl,
+        pageTitle: pageTitle
       }, (response) => {
         this.removeTypingIndicator();
 
@@ -640,7 +625,6 @@ class ChatPanel {
         }
 
         if (response.success && response.data) {
-          // If background returned assembled streaming text, use it; otherwise fall back
           const text = response.data.assembled || response.data.response || response.data.result || JSON.stringify(response.data);
           this.addMessage('assistant', text);
         } else {
@@ -650,9 +634,9 @@ class ChatPanel {
         this.inputField.disabled = false;
         this.isWaitingForResponse = false;
       });
-    } catch (error) {
+    } catch (err) {
       this.removeTypingIndicator();
-      this.addMessage('assistant', `Error: ${error.message}`);
+      this.addMessage('assistant', `Error: ${err.message}`);
       this.inputField.disabled = false;
       this.isWaitingForResponse = false;
     }
@@ -668,9 +652,7 @@ class ChatPanel {
     document.getElementById('ai-chat-screenshot-btn').disabled = true;
 
     try {
-      chrome.runtime.sendMessage({
-        action: 'capture-screenshot'
-      }, (response) => {
+      chrome.runtime.sendMessage({ action: 'capture-screenshot' }, (response) => {
         document.getElementById('ai-chat-screenshot-btn').disabled = false;
 
         if (!response) {
@@ -713,6 +695,71 @@ class ChatPanel {
       this.addMessage('assistant', `Error: ${error.message}`);
       this.isWaitingForResponse = false;
     }
+  }
+
+  /**
+   * Collect title and url
+   */
+  collectTitleAndUrl() {
+    try {
+      return { title: document.title || '', url: window.location.href || '' };
+    } catch (e) {
+      return { title: '', url: '' };
+    }
+  }
+
+  /**
+   * Collect full page text via content script
+   * @param {boolean} forceRefresh - whether to force collection (for UI button)
+   */
+  collectPageText(forceRefresh = false) {
+    return new Promise((resolve) => {
+      try {
+        // Extract visible text directly
+        const bodyClone = document.body.cloneNode(true);
+        const scripts = bodyClone.querySelectorAll('script, style, noscript');
+        scripts.forEach(el => el.remove());
+        const allText = bodyClone.innerText || bodyClone.textContent || '';
+        const cleaned = allText
+          .split('\n')
+          .map(line => line.trim())
+          .filter(line => line.length > 0)
+          .join('\n');
+        const preview = cleaned ? cleaned.substring(0, 200) : '';
+        const elem = document.getElementById('preview-alltext');
+        if (elem) elem.textContent = `Gesamter Seitentext: ${preview}${cleaned && cleaned.length > 200 ? '...' : ''}`;
+        resolve({ text: cleaned });
+      } catch (e) {
+        const elem = document.getElementById('preview-alltext');
+        if (elem) elem.textContent = `Gesamter Seitentext: nicht verfügbar`;
+        resolve({ text: '' });
+      }
+    });
+  }
+
+  /**
+   * Capture visible area and run OCR via background helper
+   * @param {boolean} forceRetry
+   */
+  collectScreenshotAndOcr(forceRetry = false) {
+    return new Promise((resolve) => {
+      chrome.runtime.sendMessage({ action: 'capture-and-ocr' }, (response) => {
+        const elem = document.getElementById('preview-ocr');
+        if (!response) {
+          if (elem) elem.textContent = 'Screenshot (OCR): nicht verfügbar';
+          resolve({ success: false, ocrText: '' });
+          return;
+        }
+        if (response.success) {
+          const preview = (response.ocrText || '').substring(0, 200);
+          if (elem) elem.textContent = `Screenshot (OCR): ${preview}${(response.ocrText || '').length > 200 ? '...' : ''}`;
+          resolve({ success: true, ocrText: response.ocrText || '', warning: response.warning });
+        } else {
+          if (elem) elem.textContent = `Screenshot (OCR): error`;
+          resolve({ success: false, error: response.error || 'OCR failed' });
+        }
+      });
+    });
   }
 
   /**
