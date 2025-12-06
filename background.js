@@ -144,7 +144,7 @@ async function handleScreenshot(tab) {
  */
 async function getActiveConfig() {
   try {
-    const result = await chrome.storage.sync.get(['activeProfile', 'selectedModel', 'profiles', 'ocrUrl']);
+    const result = await chrome.storage.sync.get(['activeProfile', 'selectedModel', 'profiles', 'ocrUrl', 'ocrOptions']);
     
     if (!result.activeProfile || !result.selectedModel || !result.profiles) {
       return null;
@@ -155,8 +155,9 @@ async function getActiveConfig() {
 
     return {
       url: profile.url,
-      selectedModel: result.selectedModel
-      ,ocrUrl: result.ocrUrl || ''
+      selectedModel: result.selectedModel,
+      ocrUrl: result.ocrUrl || '',
+      ocrOptions: result.ocrOptions || ''
     };
   } catch (error) {
     console.error('Error getting active config:', error);
@@ -179,6 +180,26 @@ async function sendImageToOcr(ocrUrl, dataUrl) {
 
     const form = new FormData();
     form.append('file', blob, 'screenshot.png');
+
+    // If OCR options provided (JSON string), append as 'options' field
+    if (typeof ocrUrl === 'string' && ocrUrl) {
+      try {
+        const stored = await chrome.storage.sync.get('ocrOptions');
+        const optionsStr = stored.ocrOptions || '';
+        if (optionsStr && optionsStr.trim()) {
+          // Ensure it's valid JSON; if so append stringified JSON
+          try {
+            const parsed = JSON.parse(optionsStr);
+            form.append('options', JSON.stringify(parsed));
+          } catch (e) {
+            // invalid JSON in storage; skip attaching options
+            console.warn('Stored OCR options invalid JSON, skipping options field');
+          }
+        }
+      } catch (e) {
+        // ignore storage read errors
+      }
+    }
 
     const resp = await fetch(ocrUrl, {
       method: 'POST',

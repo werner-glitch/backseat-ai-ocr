@@ -13,6 +13,9 @@ class ChatPanel {
     this.isWaitingForResponse = false;
     this.savedSelection = ''; // preserve user selection across panel open
     this._isDragging = false;
+    this.customHeight = null; // user-defined height in px
+    this.COLLAPSED_HEIGHT = 48; // px
+    this.MAX_VH = 0.9; // 90% of viewport
   }
 
   /**
@@ -24,8 +27,22 @@ class ChatPanel {
     }
 
     this.createPanelHTML();
+    // Load saved custom height (if any)
+    try {
+      const saved = localStorage.getItem('aiChatCustomHeight');
+      if (saved) {
+        const h = parseFloat(saved);
+        if (!Number.isNaN(h) && h > this.COLLAPSED_HEIGHT) {
+          this.customHeight = h;
+        }
+      }
+    } catch (e) {
+      this.customHeight = null;
+    }
     this.attachEventListeners();
     this.setupStyles();
+    // Sync toggle icon with initial state
+    this.updateToggleIconState();
   }
 
   /**
@@ -136,8 +153,18 @@ class ChatPanel {
     document.addEventListener('mouseup', () => {
       if (this._isDragging) {
         this._isDragging = false;
+        // Save custom height if user resized larger than collapsed
+        const finalH = this.panelElement.offsetHeight;
+        if (finalH > this.COLLAPSED_HEIGHT + 4) {
+          this.customHeight = finalH;
+          try { localStorage.setItem('aiChatCustomHeight', String(this.customHeight)); } catch (e) {}
+          this.panelElement.classList.add('ai-chat-panel-custom');
+          this.panelElement.classList.remove('ai-chat-panel-open');
+          this.panelElement.classList.remove('ai-chat-panel-closed');
+        }
         this.panelElement.style.transition = '';
         document.body.style.userSelect = '';
+        this.updateToggleIconState();
       }
     });
 
@@ -157,7 +184,16 @@ class ChatPanel {
     document.addEventListener('touchend', () => {
       if (this._isDragging) {
         this._isDragging = false;
+        const finalH = this.panelElement.offsetHeight;
+        if (finalH > this.COLLAPSED_HEIGHT + 4) {
+          this.customHeight = finalH;
+          try { localStorage.setItem('aiChatCustomHeight', String(this.customHeight)); } catch (e) {}
+          this.panelElement.classList.add('ai-chat-panel-custom');
+          this.panelElement.classList.remove('ai-chat-panel-open');
+          this.panelElement.classList.remove('ai-chat-panel-closed');
+        }
         this.panelElement.style.transition = '';
+        this.updateToggleIconState();
         document.body.style.userSelect = '';
       }
     });
@@ -444,17 +480,56 @@ class ChatPanel {
    * Toggle panel open/closed state
    */
   togglePanel() {
-    this.isOpen = !this.isOpen;
-    if (this.isOpen) {
-      this.panelElement.classList.remove('ai-chat-panel-closed');
-      this.panelElement.classList.add('ai-chat-panel-open');
-      // focus input while preserving previously saved selection
-      setTimeout(() => {
-        this.inputField.focus();
-      }, 120);
+    // Determine current visual state
+    const isCollapsed = this.panelElement.classList.contains('ai-chat-panel-closed') || this.panelElement.offsetHeight <= this.COLLAPSED_HEIGHT + 2;
+    const isMax = this.panelElement.classList.contains('ai-chat-panel-open') && this.panelElement.offsetHeight >= window.innerHeight * this.MAX_VH - 2;
+    const isCustom = this.panelElement.classList.contains('ai-chat-panel-custom') || (this.customHeight && !isCollapsed && !isMax);
+
+    if (isCollapsed) {
+      // Expand: prefer custom height if available, otherwise max
+      if (this.customHeight && this.customHeight > this.COLLAPSED_HEIGHT) {
+        this.panelElement.classList.remove('ai-chat-panel-closed');
+        this.panelElement.classList.remove('ai-chat-panel-open');
+        this.panelElement.classList.add('ai-chat-panel-custom');
+        this.panelElement.style.height = `${this.customHeight}px`;
+      } else {
+        this.panelElement.classList.remove('ai-chat-panel-closed');
+        this.panelElement.classList.add('ai-chat-panel-open');
+        this.panelElement.classList.remove('ai-chat-panel-custom');
+        this.panelElement.style.height = `${Math.floor(window.innerHeight * this.MAX_VH)}px`;
+      }
+      this.isOpen = true;
+      setTimeout(() => { this.inputField.focus(); }, 120);
     } else {
+      // Collapse to small bar
       this.panelElement.classList.remove('ai-chat-panel-open');
+      this.panelElement.classList.remove('ai-chat-panel-custom');
       this.panelElement.classList.add('ai-chat-panel-closed');
+      this.panelElement.style.height = `${this.COLLAPSED_HEIGHT}px`;
+      this.isOpen = false;
+    }
+
+    this.updateToggleIconState();
+  }
+
+  /**
+   * Update toggle button icon based on current panel state
+   */
+  updateToggleIconState() {
+    const btn = document.getElementById('ai-chat-toggle');
+    if (!btn) return;
+    const isCollapsed = this.panelElement.classList.contains('ai-chat-panel-closed') || this.panelElement.offsetHeight <= this.COLLAPSED_HEIGHT + 2;
+    const isMax = this.panelElement.classList.contains('ai-chat-panel-open') && this.panelElement.offsetHeight >= window.innerHeight * this.MAX_VH - 2;
+    const isCustom = this.panelElement.classList.contains('ai-chat-panel-custom') || (this.customHeight && !isCollapsed && !isMax);
+
+    if (isCollapsed) {
+      // show expand icon (chevron up)
+      btn.innerHTML = '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M5 12l5-5 5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+      btn.title = 'Open panel';
+    } else {
+      // show collapse icon (chevron down)
+      btn.innerHTML = '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M5 8l5 5 5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+      btn.title = isMax ? 'Collapse panel (was maximized)' : 'Collapse panel';
     }
   }
 

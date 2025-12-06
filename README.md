@@ -17,6 +17,22 @@ A powerful Chrome extension (Manifest V3) that allows you to send selected text,
 - **Real-time Responses**: View AI responses streamed into the chat panel
 - **Always Accessible**: Toggle chat panel open/closed without leaving the page
 
+### Bedienung Chat Panel
+
+Das Chat-Panel unterstützt drei Zustände:
+
+- **Eingeklappt:** Nur eine schmale Leiste am unteren Rand sichtbar (Standard: 48px Höhe).
+- **Halb offen / Benutzerdefinierte Höhe:** Wenn Sie das Panel per Drag anpassen, merkt sich die Erweiterung diese Höhe und stellt sie beim nächsten Öffnen wieder her.
+- **Maximal geöffnet:** Panel nimmt fast die gesamte Fensterhöhe ein (ca. 90% vh).
+
+Der Toggle-Button verhält sich wie folgt:
+
+- Wenn das Panel eingeklappt ist → Klick öffnet das Panel entweder auf die zuletzt benutzerdefinierte Höhe (falls vorhanden) oder auf die maximale Höhe.
+- Wenn das Panel offen (benutzerdefiniert oder maximal) ist → Klick klappt das Panel wieder ein.
+- Der Toggle-Button passt sein Icon dynamisch an (Auf-/Ab-Pfeil) und reagiert immer, auch nachdem die Panelhöhe manuell per Drag verändert wurde.
+
+Die benutzerdefinierte Höhe wird lokal im Browser gespeichert, sodass Ihre bevorzugte Größe auf weiteren Seiten wiederverwendet wird.
+
 🔧 **Multi-Profile Support**
 - Create multiple server profiles (Ollama, local LLMs, public APIs)
 - Switch between profiles instantly
@@ -145,6 +161,20 @@ A powerful Chrome extension (Manifest V3) that allows you to send selected text,
    - The extension posts the screenshot as a `multipart/form-data` file upload with the field name `file` (filename `screenshot.png`).
    - The OCR endpoint is expected to respond with JSON like: `{ "text": "recognized text..." }`.
    - If OCR succeeds, the recognized text is used as the `content` field sent to your model API. If OCR fails or is not configured, the extension falls back to sending an indicator that a screenshot was provided.
+
+   ### OCR Options Field
+
+   The Options page now includes a free-editable **OCR Options** field where you can enter arbitrary JSON that will be forwarded to your OCR server as the form field `options` (stringified JSON). This field is universal and intended to support the various servers you might run locally.
+
+   - Example for `hertzg/tesseract-server` (required to recognize German):
+
+   ```json
+   {"languages":["deu"]}
+   ```
+
+   - You can also include other keys your OCR server accepts (e.g. `psm`, `oem`, etc.). The extension validates that the value you enter is valid JSON when you save the OCR settings and will show an error if the JSON is invalid.
+
+   If the OCR options are present and valid, the extension will send them alongside the uploaded file as the `options` field in the `multipart/form-data` POST to the OCR endpoint.
 
 #### Via Popup
 

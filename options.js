@@ -10,6 +10,7 @@ let profiles = [];
 let currentSelectedProfile = null;
 let availableModels = [];
 let ocrUrl = '';
+let ocrOptionsStr = '';
 
 /**
  * Initialize options page
@@ -27,10 +28,14 @@ async function init() {
   document.getElementById('save-profile-selection-btn').addEventListener('click', saveProfileSelection);
   // OCR buttons
   const ocrInput = document.getElementById('ocr-url');
+  const ocrOptionsTextarea = document.getElementById('ocr-options');
   const saveOcrBtn = document.getElementById('save-ocr-btn');
   const testOcrBtn = document.getElementById('test-ocr-btn');
   if (ocrInput) {
     ocrInput.addEventListener('input', (e) => { ocrUrl = e.target.value.trim(); });
+  }
+  if (ocrOptionsTextarea) {
+    ocrOptionsTextarea.addEventListener('input', (e) => { ocrOptionsStr = e.target.value; });
   }
   if (saveOcrBtn) saveOcrBtn.addEventListener('click', saveOcrUrl);
   if (testOcrBtn) testOcrBtn.addEventListener('click', testOcrEndpoint);
@@ -53,6 +58,11 @@ async function loadProfiles() {
     ocrUrl = r2.ocrUrl || '';
     const ocrInput = document.getElementById('ocr-url');
     if (ocrInput) ocrInput.value = ocrUrl;
+    // load ocr options
+    const r3 = await chrome.storage.sync.get('ocrOptions');
+    ocrOptionsStr = r3.ocrOptions || '';
+    const ocrOptionsTextarea = document.getElementById('ocr-options');
+    if (ocrOptionsTextarea) ocrOptionsTextarea.value = ocrOptionsStr;
   } catch (e) {
     console.warn('Failed to load ocrUrl:', e);
   }
@@ -378,11 +388,21 @@ async function saveProfileSelection() {
  */
 async function saveOcrUrl() {
   try {
-    await chrome.storage.sync.set({ ocrUrl: ocrUrl });
-    showStatus('✓ OCR URL saved!');
+    // validate ocrOptionsStr is valid JSON (if not empty)
+    if (ocrOptionsStr && ocrOptionsStr.trim().length > 0) {
+      try {
+        JSON.parse(ocrOptionsStr);
+      } catch (err) {
+        showError('OCR Options must be valid JSON: ' + err.message);
+        return;
+      }
+    }
+
+    await chrome.storage.sync.set({ ocrUrl: ocrUrl, ocrOptions: ocrOptionsStr });
+    showStatus('✓ OCR settings saved!');
     clearMessages();
   } catch (error) {
-    showError(`Failed to save OCR URL: ${error.message}`);
+    showError(`Failed to save OCR settings: ${error.message}`);
   }
 }
 

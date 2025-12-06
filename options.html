@@ -87,6 +87,11 @@
                     class="form-input"
                 >
                 <p class="help-text">If set, screenshots will first be sent to this OCR endpoint as a file upload (multipart/form-data with field <code>file</code>), and the returned text will be forwarded to your model API. Expected JSON response: <code>{ "text": "..." }</code>.</p>
+                <div class="form-group">
+                    <label for="ocr-options">OCR Options (JSON):</label>
+                    <textarea id="ocr-options" class="form-input" placeholder='e.g. {"languages":["deu"]}' rows="4"></textarea>
+                    <p class="help-text">Enter any JSON options your OCR server accepts. This will be sent as the form field <code>options</code> (JSON string). Example for tesseract-server: <code>{"languages":["deu"]}</code></p>
+                </div>
                 <div class="button-row">
                     <button id="save-ocr-btn" class="btn btn-primary">Save OCR URL</button>
                     <button id="test-ocr-btn" class="btn btn-secondary">Test OCR Endpoint</button>
