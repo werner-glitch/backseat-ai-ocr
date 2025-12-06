@@ -65,19 +65,7 @@ class ChatPanel {
     this.setupStyles();
     // Sync toggle icon with initial state
     this.updateToggleIconState();
-    // Initial automatic collection of sources for preview
-    try {
-      const t = this.collectTitleAndUrl();
-      const titleElem = document.getElementById('preview-title');
-      const urlElem = document.getElementById('preview-url');
-      if (titleElem) titleElem.textContent = `Seiten-Titel: ${t.title || 'nicht verfügbar'}`;
-      if (urlElem) urlElem.textContent = `Seiten-URL: ${t.url || 'nicht verfügbar'}`;
-      // Kick off async collections
-      this.collectPageText();
-      this.collectScreenshotAndOcr();
-    } catch (e) {
-      // ignore
-    }
+    // No automatic collection on init. Sources are collected only when the user clicks "Senden".
   }
 
   /**
@@ -101,7 +89,7 @@ class ChatPanel {
         </div>
         <div class="ai-chat-messages" id="ai-chat-messages"></div>
         <div id="ai-chat-preview" class="ai-chat-preview" style="padding:8px;border-top:1px solid #eee;font-size:12px;max-height:150px;overflow:auto;">
-          <div><strong>Collected sources:</strong></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;"><div><strong>Collected sources (last used):</strong></div><div id="preview-timestamp" style="font-size:11px;color:#666">-</div></div>
           <div id="preview-title">Seiten-Titel: -</div>
           <div id="preview-url">Seiten-URL: -</div>
           <div id="preview-alltext">Gesamter Seitentext: -</div>
@@ -596,6 +584,16 @@ class ChatPanel {
 
     // Restore panel visibility after capture
     try { if (this.panelElement) this.panelElement.style.visibility = ''; } catch (e) {}
+
+    // Update preview to show which sources were used and when
+    try {
+      const ts = new Date().toLocaleString();
+      const previewTs = document.getElementById('preview-timestamp'); if (previewTs) previewTs.textContent = ts;
+      const pTitle = document.getElementById('preview-title'); if (pTitle) pTitle.textContent = `Seiten-Titel: ${pageTitle || 'nicht verfügbar'}`;
+      const pUrl = document.getElementById('preview-url'); if (pUrl) pUrl.textContent = `Seiten-URL: ${pageUrl || 'nicht verfügbar'}`;
+      const pAll = document.getElementById('preview-alltext'); if (pAll) pAll.textContent = `Gesamter Seitentext: ${allText ? allText.substring(0,200) + (allText.length>200? '...':'') : 'nicht verfügbar'}`;
+      const pOcr = document.getElementById('preview-ocr'); if (pOcr) pOcr.textContent = `Screenshot (OCR): ${ocrText ? ocrText.substring(0,200) + (ocrText.length>200? '...':'') : 'nicht verfügbar'}`;
+    } catch (e) {}
 
     // Determine question: use user input if provided; otherwise default explanatory prompt
     if (!question || question.length === 0) {
