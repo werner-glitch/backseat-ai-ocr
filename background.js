@@ -287,9 +287,17 @@ async function sendToApi(config, data) {
     // Build a comprehensive prompt from all available data
     // If caller supplied a fully assembled prompt, use it directly
     if (data && typeof data.prompt === 'string' && data.prompt.length > 0) {
+      // If a system prompt exists for the active profile or caller provided one, prepend it
+      let finalPrompt = data.prompt;
+      if (data.systemPrompt && data.systemPrompt.trim()) {
+        finalPrompt = `System Prompt:\n${data.systemPrompt.trim()}\n\n` + finalPrompt;
+      } else if (config.systemPrompt && config.systemPrompt.trim()) {
+        finalPrompt = `System Prompt:\n${config.systemPrompt.trim()}\n\n` + finalPrompt;
+      }
+
       const requestBodyDirect = {
         model: config.selectedModel,
-        prompt: data.prompt
+        prompt: finalPrompt
       };
       const response = await fetch(apiUrl, {
         method: 'POST',

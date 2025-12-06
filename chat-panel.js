@@ -604,51 +604,69 @@ class ChatPanel {
     this.addMessage('user', this.inputField.value.trim() ? this.inputField.value.trim() : '[Automatische Beschreibung angefordert]');
     this.inputField.value = '';
     this.inputField.disabled = true;
-    // Build combined prompt via background helper to ensure consistent format and truncation
+    // Build per-source, question-centered summaries, then combine summaries and ask final question
     try {
-      const buildResp = await new Promise((resolve) => {
-        // include selection text if present so the prompt builder can include it
-        chrome.runtime.sendMessage({ action: 'build-prompt', payload: { pageTitle, pageUrl, allText, ocrText, question, selection: selectionText } }, resolve);
-      });
+      // helper to send assembled prompt to background and await response
+      const sendPrompt = (prompt) => {
+        return new Promise((resolve) => {
+          chrome.runtime.sendMessage({ action: 'send-chat-message', assembledPrompt: prompt, dataType: 'summarization' }, (resp) => resolve(resp));
+        });
+      };
 
-      if (!buildResp || !buildResp.success) {
-        this.removeTypingIndicator();
-        this.addMessage('assistant', `Error building prompt: ${buildResp?.error || 'unknown'}`);
-        this.inputField.disabled = false;
-        this.isWaitingForResponse = false;
-        return;
+      const sources = [];
+      if (selectionText && selectionText.trim()) sources.push({ name: 'Auswahl', content: selectionText });
+      if (allText && allText.trim()) sources.push({ name: 'Website-Text', content: allText });
+      if (ocrText && ocrText.trim()) sources.push({ name: 'OCR', content: ocrText });
+
+      const summaries = [];
+      // Limit to 3 summaries (as requested)
+      for (let i = 0; i < Math.min(3, sources.length); i++) {
+        const src = sources[i];
+        // Build per-source prompt that asks for a question-focused summary
+        const perPrompt = `Hier ist ein Textauszug (Quelle: ${src.name}). Die Nutzerfrage lautet: "${question}"\n\n"Fasse die wichtigsten Informationen aus diesem Auszug zusammen, die zur Beantwortung der Frage beitragen."\n\nTextauszug:\n${src.content}`;
+
+        const resp = await sendPrompt(perPrompt);
+        let summaryText = '';
+        if (resp && resp.success && resp.data) {
+          summaryText = resp.data.assembled || resp.data.response || resp.data.result || JSON.stringify(resp.data);
+        } else if (resp && resp.error) {
+          summaryText = `[Fehler bei der Zusammenfassung: ${resp.error}]`;
+        } else {
+          summaryText = '[Keine Antwort bei der Zusammenfassung]';
+        }
+
+        summaries.push({ name: src.name, summary: summaryText });
       }
 
-      const assembledPrompt = buildResp.prompt;
-
-      // Send to background to call API; pass assembled prompt so background can prepend system prompt if needed
-      chrome.runtime.sendMessage({
-        action: 'send-chat-message',
-        question: question,
-        assembledPrompt: assembledPrompt,
-        dataType: 'combined_prompt',
-        pageUrl: pageUrl,
-        pageTitle: pageTitle
-      }, (response) => {
-        this.removeTypingIndicator();
-
-        if (!response) {
-          this.addMessage('assistant', 'Error: No response from extension.');
-          this.inputField.disabled = false;
-          this.isWaitingForResponse = false;
-          return;
+      // If there were no sources with content, fallback: ask question directly (or use default summary behavior)
+      let finalPrompt = '';
+      if (summaries.length === 0) {
+        finalPrompt = `Die Nutzerfrage lautet: "${question}"\n\nBeantworte die Frage so präzise wie möglich.`;
+      } else {
+        // assemble final prompt from summaries
+        const parts = ['Hier sind die zusammengefassten, frage-relevanten Informationen aus verschiedenen Quellen:'];
+        for (const s of summaries) {
+          parts.push(`- ${s.name}: ${s.summary}`);
         }
+        parts.push(`\nDie Nutzerfrage lautet: "${question}"\nBeantworte die Frage so präzise wie möglich auf Basis dieser Daten.`);
+        finalPrompt = parts.join('\n');
+      }
 
-        if (response.success && response.data) {
-          const text = response.data.assembled || response.data.response || response.data.result || JSON.stringify(response.data);
-          this.addMessage('assistant', text);
-        } else {
-          this.addMessage('assistant', `Error: ${response.error || 'Unknown error'}`);
-        }
+      // Send final prompt
+      const finalResp = await sendPrompt(finalPrompt);
+      this.removeTypingIndicator();
 
-        this.inputField.disabled = false;
-        this.isWaitingForResponse = false;
-      });
+      if (!finalResp) {
+        this.addMessage('assistant', 'Error: No response from extension.');
+      } else if (finalResp.success && finalResp.data) {
+        const text = finalResp.data.assembled || finalResp.data.response || finalResp.data.result || JSON.stringify(finalResp.data);
+        this.addMessage('assistant', text);
+      } else {
+        this.addMessage('assistant', `Error: ${finalResp.error || 'Unknown error'}`);
+      }
+
+      this.inputField.disabled = false;
+      this.isWaitingForResponse = false;
     } catch (err) {
       this.removeTypingIndicator();
       this.addMessage('assistant', `Error: ${err.message}`);
