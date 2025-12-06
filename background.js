@@ -430,94 +430,63 @@ async function sendToApi(config, data) {
       let buffer = '';
       let assembled = '';
 
-      // Helper: try to extract a complete JSON object from the buffer using brace matching
-      function extractJsonFromBuffer(buf) {
-        const firstOpen = buf.indexOf('{');
-        if (firstOpen === -1) return null;
-        let depth = 0;
-        for (let i = firstOpen; i < buf.length; i++) {
-          const ch = buf[i];
-          if (ch === '{') depth++;
-          else if (ch === '}') {
-            depth--;
-            if (depth === 0) {
-              const jsonStr = buf.slice(firstOpen, i + 1);
-              return { jsonStr, endIndex: i + 1 };
-            }
-          }
-        }
-        return null; // no complete JSON yet
-      }
-
+      // Read chunks and split on newlines; parse each non-empty line as JSON
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
 
-        // Attempt to extract as many complete JSON objects as possible from buffer
-        while (true) {
-          const found = extractJsonFromBuffer(buffer);
-          if (!found) break;
-          const { jsonStr, endIndex } = found;
+        const lines = buffer.split(/\r?\n/);
+        // keep the last partial line in buffer
+        buffer = lines.pop();
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          // Strip common event-stream prefix like "data: "
+          let candidate = trimmed.replace(/^data:\s*/i, '');
           try {
-            const obj = JSON.parse(jsonStr);
+            const obj = JSON.parse(candidate);
             assembled += extractTextFromObject(obj);
+            continue;
           } catch (e) {
-            // If parsing fails, try to be resilient: strip known prefixes like "data: " and retry
-            const alt = jsonStr.replace(/^\s*data:\s*/i, '');
-            try {
-              const obj2 = JSON.parse(alt);
-              assembled += extractTextFromObject(obj2);
-            } catch (e2) {
-              // ignore this chunk
+            // try to recover JSON substring between first { and last }
+            const first = candidate.indexOf('{');
+            const last = candidate.lastIndexOf('}');
+            if (first !== -1 && last !== -1 && last > first) {
+              const sub = candidate.slice(first, last + 1);
+              try {
+                const obj2 = JSON.parse(sub);
+                assembled += extractTextFromObject(obj2);
+                continue;
+              } catch (e2) {
+                // fallthrough to ignore line
+              }
             }
-          }
-          // remove processed portion from buffer
-          buffer = buffer.slice(endIndex);
-        }
-        // Additionally, if buffer contains newline-separated lines that are small, try parsing each line
-        if (buffer.includes('\n')) {
-          const lines = buffer.split(/\r?\n/);
-          // keep last partial line in buffer
-          buffer = lines.pop();
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed) continue;
-            let candidate = trimmed.replace(/^data:\s*/i, '');
-            try {
-              const obj = JSON.parse(candidate);
-              assembled += extractTextFromObject(obj);
-            } catch (e) {
-              // ignore non-JSON lines
-            }
+            // ignore non-JSON line
           }
         }
       }
 
-      // Final attempt to parse remaining buffer
-      try {
-        // try to extract trailing JSONs
-        while (true) {
-          const found = extractJsonFromBuffer(buffer);
-          if (!found) break;
-          const { jsonStr, endIndex } = found;
-          try {
-            const obj = JSON.parse(jsonStr);
-            assembled += extractTextFromObject(obj);
-          } catch (e) {
-            const alt = jsonStr.replace(/^\s*data:\s*/i, '');
-            try { const obj2 = JSON.parse(alt); assembled += extractTextFromObject(obj2); } catch (e2) { /* ignore */ }
+      // Process remaining buffer (if it contains a full JSON line)
+      const rem = buffer.trim();
+      if (rem) {
+        let candidate = rem.replace(/^data:\s*/i, '');
+        try {
+          const obj = JSON.parse(candidate);
+          assembled += extractTextFromObject(obj);
+        } catch (e) {
+          const first = candidate.indexOf('{');
+          const last = candidate.lastIndexOf('}');
+          if (first !== -1 && last !== -1 && last > first) {
+            try {
+              const obj2 = JSON.parse(candidate.slice(first, last + 1));
+              assembled += extractTextFromObject(obj2);
+            } catch (e2) {
+              // ignore
+            }
           }
-          buffer = buffer.slice(endIndex);
         }
-        // If any non-json textual remainder exists, append as-is (trimmed)
-        const rem = buffer.trim();
-        if (rem) {
-          // avoid adding raw JSON parse errors; keep as fallback text
-          assembled += '\n' + rem;
-        }
-      } catch (e) {
-        // ignore
       }
 
       return {
