@@ -121,12 +121,7 @@ class ChatPanel {
               <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
             </svg>
           </button>
-          <button id="ai-chat-screenshot-btn" class="ai-chat-screenshot-btn" title="Attach screenshot">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
-              <circle cx="12" cy="13" r="4"></circle>
-            </svg>
-          </button>
+          <!-- Screenshot button removed; Send will collect screenshot/OCR automatically -->
         </div>
         <div class="ai-chat-footer">
           <small>Configured API</small>
@@ -155,7 +150,7 @@ class ChatPanel {
       this.togglePanel();
     });
 
-    // Send button
+    // Send button: now collects all sources including screenshot/OCR
     document.getElementById('ai-chat-send-btn').addEventListener('click', () => {
       this.handleSendMessage();
     });
@@ -167,10 +162,7 @@ class ChatPanel {
       }
     });
 
-    // Screenshot button
-    document.getElementById('ai-chat-screenshot-btn').addEventListener('click', () => {
-      this.handleScreenshot();
-    });
+    // no separate screenshot button anymore; screenshot will be gathered on send
 
     // Profile select change
     const profileSelect = document.getElementById('ai-chat-profile-select');
@@ -569,15 +561,31 @@ class ChatPanel {
    * Handle sending a message
    */
   async handleSendMessage() {
-    const question = this.inputField.value.trim();
-    if (!question || this.isWaitingForResponse) return;
+    let question = this.inputField.value.trim();
+    if (this.isWaitingForResponse) return;
 
-    // Instead of single context, collect 3 data sources: page text, screenshot OCR, title+url
+    // Collect all sources: selection, title+url, page text, screenshot+OCR
     this.showTypingIndicator();
     this.isWaitingForResponse = true;
-    // collect in parallel where possible
+
+    // Preserve any current selection
+    let selectionText = '';
+    try { selectionText = window.getSelection().toString() || this.savedSelection || ''; } catch (e) { selectionText = this.savedSelection || ''; }
+
     const titleUrl = this.collectTitleAndUrl();
     const pageTextPromise = this.collectPageText();
+
+    // Before capturing screenshot, hide the panel so it is not visible in the capture
+    try {
+      if (this.panelElement) {
+        this.panelElement.style.visibility = 'hidden';
+      }
+      // allow layout to update
+      await new Promise(r => setTimeout(r, 120));
+    } catch (e) {
+      // ignore
+    }
+
     const ocrPromise = this.collectScreenshotAndOcr();
 
     const [allTextRes, ocrRes] = await Promise.all([pageTextPromise, ocrPromise]);
@@ -586,14 +594,23 @@ class ChatPanel {
     const pageTitle = titleUrl.title || '';
     const pageUrl = titleUrl.url || '';
 
-    // Add user message to chat
-    this.addMessage('user', question);
+    // Restore panel visibility after capture
+    try { if (this.panelElement) this.panelElement.style.visibility = ''; } catch (e) {}
+
+    // Determine question: use user input if provided; otherwise default explanatory prompt
+    if (!question || question.length === 0) {
+      question = 'Bitte beschreibe, was auf dieser Seite bzw. im Screenshot zu sehen ist und weise auf Besonderheiten oder auffällige Elemente hin.';
+    }
+
+    // Add user message to chat (show user's question or that we asked for an explanation)
+    this.addMessage('user', this.inputField.value.trim() ? this.inputField.value.trim() : '[Automatische Beschreibung angefordert]');
     this.inputField.value = '';
     this.inputField.disabled = true;
     // Build combined prompt via background helper to ensure consistent format and truncation
     try {
       const buildResp = await new Promise((resolve) => {
-        chrome.runtime.sendMessage({ action: 'build-prompt', payload: { pageTitle, pageUrl, allText, ocrText, question } }, resolve);
+        // include selection text if present so the prompt builder can include it
+        chrome.runtime.sendMessage({ action: 'build-prompt', payload: { pageTitle, pageUrl, allText, ocrText, question, selection: selectionText } }, resolve);
       });
 
       if (!buildResp || !buildResp.success) {

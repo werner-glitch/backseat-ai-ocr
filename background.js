@@ -663,12 +663,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
  * If any section missing/empty, substitute 'nicht verfügbar'
  * Truncate sections to keep total length under maxChars
  */
-function buildCombinedPrompt({ systemPrompt = '', pageTitle = '', pageUrl = '', allText = '', ocrText = '', question = '' } = {}) {
+function buildCombinedPrompt({ systemPrompt = '', pageTitle = '', pageUrl = '', allText = '', ocrText = '', question = '', selection = '' } = {}) {
   const maxChars = 30000; // overall limit
 
   const sections = [];
   if (systemPrompt && systemPrompt.trim()) {
     sections.push(`${systemPrompt.trim()}`);
+  }
+
+  if (selection && String(selection).trim()) {
+    sections.push(`Ausgewählter Text:
+${String(selection).trim()}`);
   }
 
   sections.push(`Seiten-Titel: ${pageTitle && pageTitle.trim() ? pageTitle.trim() : 'nicht verfügbar'}`);
