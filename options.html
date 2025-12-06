@@ -78,6 +78,20 @@
         <!-- Data Format Section -->
         <div class="option-section">
             <h2>Data Format</h2>
+            <div class="form-group">
+                <label for="ocr-url">OCR API URL:</label>
+                <input 
+                    type="url" 
+                    id="ocr-url" 
+                    placeholder="http://localhost:5000/ocr"
+                    class="form-input"
+                >
+                <p class="help-text">If set, screenshots will first be sent to this OCR endpoint as a file upload (multipart/form-data with field <code>file</code>), and the returned text will be forwarded to your model API. Expected JSON response: <code>{ "text": "..." }</code>.</p>
+                <div class="button-row">
+                    <button id="save-ocr-btn" class="btn btn-primary">Save OCR URL</button>
+                    <button id="test-ocr-btn" class="btn btn-secondary">Test OCR Endpoint</button>
+                </div>
+            </div>
             <p>The extension sends data in the following JSON format:</p>
             <pre><code>{
   "type": "selected_text|all_text|screenshot",

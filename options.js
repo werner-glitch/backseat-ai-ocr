@@ -9,6 +9,7 @@ document.addEventListener('DOMContentLoaded', init);
 let profiles = [];
 let currentSelectedProfile = null;
 let availableModels = [];
+let ocrUrl = '';
 
 /**
  * Initialize options page
@@ -24,6 +25,15 @@ async function init() {
   document.getElementById('fetch-models-btn').addEventListener('click', fetchModels);
   document.getElementById('active-profile').addEventListener('change', onActiveProfileChanged);
   document.getElementById('save-profile-selection-btn').addEventListener('click', saveProfileSelection);
+  // OCR buttons
+  const ocrInput = document.getElementById('ocr-url');
+  const saveOcrBtn = document.getElementById('save-ocr-btn');
+  const testOcrBtn = document.getElementById('test-ocr-btn');
+  if (ocrInput) {
+    ocrInput.addEventListener('input', (e) => { ocrUrl = e.target.value.trim(); });
+  }
+  if (saveOcrBtn) saveOcrBtn.addEventListener('click', saveOcrUrl);
+  if (testOcrBtn) testOcrBtn.addEventListener('click', testOcrEndpoint);
 }
 
 /**
@@ -36,6 +46,15 @@ async function loadProfiles() {
   } catch (error) {
     console.error('Error loading profiles:', error);
     profiles = [];
+  }
+  // Load OCR URL if present
+  try {
+    const r2 = await chrome.storage.sync.get('ocrUrl');
+    ocrUrl = r2.ocrUrl || '';
+    const ocrInput = document.getElementById('ocr-url');
+    if (ocrInput) ocrInput.value = ocrUrl;
+  } catch (e) {
+    console.warn('Failed to load ocrUrl:', e);
   }
 }
 
@@ -351,6 +370,53 @@ async function saveProfileSelection() {
     clearMessages();
   } catch (error) {
     showError(`Failed to save selection: ${error.message}`);
+  }
+}
+
+/**
+ * Save OCR URL to storage
+ */
+async function saveOcrUrl() {
+  try {
+    await chrome.storage.sync.set({ ocrUrl: ocrUrl });
+    showStatus('✓ OCR URL saved!');
+    clearMessages();
+  } catch (error) {
+    showError(`Failed to save OCR URL: ${error.message}`);
+  }
+}
+
+/**
+ * Test OCR endpoint by sending a simple GET request (ping)
+ */
+async function testOcrEndpoint() {
+  if (!ocrUrl) {
+    showError('Please enter an OCR URL first');
+    return;
+  }
+
+  const elem = document.getElementById('test-result');
+  elem.style.display = 'block';
+  elem.innerHTML = '<p>Testing OCR endpoint...</p>';
+
+  try {
+    const resp = await fetch(ocrUrl, { method: 'GET' });
+    if (!resp.ok) {
+      showTestResult('error', { error: `HTTP ${resp.status}: ${resp.statusText}` });
+      return;
+    }
+
+    // Try parsing JSON to give better feedback
+    let data = null;
+    try { data = await resp.json(); } catch (e) { data = null; }
+
+    showTestResult('success', {
+      status: resp.status,
+      statusText: 'OCR endpoint reachable',
+      response: data || 'No JSON response'
+    });
+  } catch (error) {
+    showTestResult('error', { error: error.message });
   }
 }
 

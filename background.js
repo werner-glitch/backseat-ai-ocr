@@ -144,7 +144,7 @@ async function handleScreenshot(tab) {
  */
 async function getActiveConfig() {
   try {
-    const result = await chrome.storage.sync.get(['activeProfile', 'selectedModel', 'profiles']);
+    const result = await chrome.storage.sync.get(['activeProfile', 'selectedModel', 'profiles', 'ocrUrl']);
     
     if (!result.activeProfile || !result.selectedModel || !result.profiles) {
       return null;
@@ -156,10 +156,53 @@ async function getActiveConfig() {
     return {
       url: profile.url,
       selectedModel: result.selectedModel
+      ,ocrUrl: result.ocrUrl || ''
     };
   } catch (error) {
     console.error('Error getting active config:', error);
     return null;
+  }
+}
+
+/**
+ * Send image data URL to OCR endpoint using multipart/form-data
+ * @param {string} ocrUrl
+ * @param {string} dataUrl - data:image/png;base64,...
+ * @returns {Promise<{success:boolean,text?:string,error?:string}>}
+ */
+async function sendImageToOcr(ocrUrl, dataUrl) {
+  try {
+    if (!ocrUrl) return { success: false, error: 'No OCR URL configured' };
+
+    // Convert data URL to Blob
+    const blob = await (await fetch(dataUrl)).blob();
+
+    const form = new FormData();
+    form.append('file', blob, 'screenshot.png');
+
+    const resp = await fetch(ocrUrl, {
+      method: 'POST',
+      body: form
+    });
+
+    if (!resp.ok) {
+      return { success: false, error: `OCR HTTP ${resp.status}: ${resp.statusText}` };
+    }
+
+    const json = await resp.json();
+    if (json && typeof json.text === 'string') {
+      return { success: true, text: json.text };
+    }
+
+    // Some OCR servers may return other shapes
+    if (json && (json.result || json.data || json.output)) {
+      const fallback = json.text || json.result || json.data || json.output;
+      if (typeof fallback === 'string') return { success: true, text: fallback };
+    }
+
+    return { success: false, error: 'OCR did not return a text field' };
+  } catch (error) {
+    return { success: false, error: error.message };
   }
 }
 
@@ -195,10 +238,30 @@ async function sendToApi(config, data) {
       promptParts.push(`Page URL: ${data.pageUrl}`);
     }
     
-    // Add content (text or screenshot reference)
+    // Add content (text or screenshot reference). If screenshot, try OCR first.
     if (data.content) {
-      if (data.type === 'screenshot') {
-        promptParts.push(`[Screenshot has been provided as Base64 PNG]`);
+      if (String(data.type).toLowerCase().includes('screenshot')) {
+        // If content is a data URL (data:image/...), and OCR URL configured, send to OCR server
+        const isDataUrl = String(data.content).startsWith('data:');
+        if (isDataUrl && config.ocrUrl) {
+          try {
+            const ocrResult = await sendImageToOcr(config.ocrUrl, data.content);
+            if (ocrResult.success && ocrResult.text) {
+              promptParts.push(`Content (from OCR):\n${ocrResult.text}`);
+            } else {
+              // OCR failed: fall back to indicating screenshot provided
+              promptParts.push(`[Screenshot provided; OCR failed: ${ocrResult.error || 'unknown'}]`);
+            }
+          } catch (e) {
+            promptParts.push(`[Screenshot provided; OCR error: ${e.message}]`);
+          }
+        } else if (isDataUrl && !config.ocrUrl) {
+          // No OCR endpoint configured
+          promptParts.push(`[Screenshot provided as Base64 PNG; set an OCR URL in options to extract text automatically]`);
+        } else {
+          // Content is already plain text (maybe OCRed upstream) or other format
+          promptParts.push(`Content:\n${data.content}`);
+        }
       } else {
         promptParts.push(`Content:\n${data.content}`);
       }

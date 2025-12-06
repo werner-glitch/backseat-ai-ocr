@@ -134,7 +134,17 @@ A powerful Chrome extension (Manifest V3) that allows you to send selected text,
 - **Send Screenshot**
   1. Right-click anywhere on a page
   2. Select "Send Screenshot to API"
-  3. Extension captures visible tab and sends as base64 PNG
+   3. Extension captures visible tab and sends as base64 PNG
+
+  
+   **OCR Integration (optional)**
+
+   If you configure an OCR endpoint in the extension options, screenshots are first sent to that OCR endpoint and the recognized text is forwarded to your model API instead of the raw base64 image.
+
+   - Configure OCR URL in the Options page (e.g. `http://localhost:5000/ocr`).
+   - The extension posts the screenshot as a `multipart/form-data` file upload with the field name `file` (filename `screenshot.png`).
+   - The OCR endpoint is expected to respond with JSON like: `{ "text": "recognized text..." }`.
+   - If OCR succeeds, the recognized text is used as the `content` field sent to your model API. If OCR fails or is not configured, the extension falls back to sending an indicator that a screenshot was provided.
 
 #### Via Popup
 
