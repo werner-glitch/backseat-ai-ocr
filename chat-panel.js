@@ -99,6 +99,7 @@ class ChatPanel {
           <div id="preview-alltext">Gesamter Seitentext: -</div>
           <div id="preview-ocr">Screenshot (OCR): -</div>
           <div style="margin-top:6px;"><button id="refresh-alltext-btn" style="margin-right:6px;">Neu sammeln</button><button id="retry-ocr-btn">OCR neu</button></div>
+          <div style="margin-top:6px;"><button id="test-all-sources-btn" style="margin-right:6px;">Alle Quellen testen</button></div>
         </div>
         <div class="ai-chat-input-group">
           <input 
@@ -118,6 +119,11 @@ class ChatPanel {
         </div>
         <div class="ai-chat-footer">
           <small>Configured API</small>
+        </div>
+        <div id="ai-chat-responses" style="padding:8px;border-top:1px solid #eee;font-size:13px;max-height:260px;overflow:auto;background:#fff;">
+          <div id="response-ocr" style="margin-bottom:8px;"><strong>Antwort auf OCR:</strong><div class="response-body" id="response-ocr-body">-</div></div>
+          <div id="response-alltext" style="margin-bottom:8px;"><strong>Antwort auf Seitentext:</strong><div class="response-body" id="response-alltext-body">-</div></div>
+          <div id="response-selection" style="margin-bottom:8px;"><strong>Antwort auf Markierung:</strong><div class="response-body" id="response-selection-body">-</div></div>
         </div>
         <div id="ai-chat-debug-log-wrap" style="display:none;padding:8px;border-top:1px solid #eee;background:#111;color:#0f0;max-height:160px;overflow:auto;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><strong style="color:#fff;font-size:13px;">Debug Log</strong><button id="ai-chat-clear-log" style="font-size:12px;padding:4px 8px;border-radius:6px;">Clear</button></div>
@@ -635,75 +641,49 @@ class ChatPanel {
     this.addMessage('user', this.inputField.value.trim() ? this.inputField.value.trim() : '[Automatische Beschreibung angefordert]');
     this.inputField.value = '';
     this.inputField.disabled = true;
-    // Build per-source, question-centered summaries, then combine summaries and ask final question
-    try {
-      // helper to send assembled prompt to background and await response
-      const sendPrompt = (prompt) => {
-        return new Promise((resolve) => {
-          chrome.runtime.sendMessage({ action: 'send-chat-message', assembledPrompt: prompt, dataType: 'summarization' }, (resp) => resolve(resp));
+    // For each source, send it separately to the background and display the raw response
+    const sendSingleSource = (name, content) => {
+      return new Promise((resolve) => {
+        const assembledPrompt = `Hinweis: Dies ist der Inhalt der Quelle: ${name}\n\nInhalt:\n${content}`;
+        const payload = { action: 'send-chat-message', assembledPrompt, dataType: 'source', meta: { source: name, raw: content } };
+        // If debug is enabled, log the outgoing payload
+        try { if (this.debugToggle && this.debugToggle.checked) this.debugLog(`-> [${name}] Request JSON: ${JSON.stringify(payload)}`); } catch (e) {}
+        chrome.runtime.sendMessage(payload, (resp) => {
+          try { if (this.debugToggle && this.debugToggle.checked) this.debugLog(`<- [${name}] Response: ${JSON.stringify(resp)}`); } catch (e) {}
+          resolve({ name, resp });
         });
-      };
+      });
+    };
 
-      const sources = [];
-      if (selectionText && selectionText.trim()) sources.push({ name: 'Auswahl', content: selectionText });
-      if (allText && allText.trim()) sources.push({ name: 'Website-Text', content: allText });
-      if (ocrText && ocrText.trim()) sources.push({ name: 'OCR', content: ocrText });
+    const sources = [];
+    if (selectionText && selectionText.trim()) sources.push({ name: 'Markierung', content: selectionText });
+    if (allText && allText.trim()) sources.push({ name: 'Seitentext', content: allText });
+    if (ocrText && ocrText.trim()) sources.push({ name: 'OCR', content: ocrText });
 
-      const summaries = [];
-      // Limit to 3 summaries (as requested)
-      for (let i = 0; i < Math.min(3, sources.length); i++) {
-        const src = sources[i];
-        // Build per-source prompt that asks for a question-focused summary
-        const perPrompt = `Hier ist ein Textauszug (Quelle: ${src.name}). Die Nutzerfrage lautet: "${question}"\n\n"Fasse die wichtigsten Informationen aus diesem Auszug zusammen, die zur Beantwortung der Frage beitragen."\n\nTextauszug:\n${src.content}`;
-
-        const resp = await sendPrompt(perPrompt);
-        let summaryText = '';
-        if (resp && resp.success && resp.data) {
-          summaryText = resp.data.assembled || resp.data.response || resp.data.result || JSON.stringify(resp.data);
-        } else if (resp && resp.error) {
-          summaryText = `[Fehler bei der Zusammenfassung: ${resp.error}]`;
-        } else {
-          summaryText = '[Keine Antwort bei der Zusammenfassung]';
-        }
-
-        summaries.push({ name: src.name, summary: summaryText });
-      }
-
-      // If there were no sources with content, fallback: ask question directly (or use default summary behavior)
-      let finalPrompt = '';
-      if (summaries.length === 0) {
-        finalPrompt = `Die Nutzerfrage lautet: "${question}"\n\nBeantworte die Frage so präzise wie möglich.`;
-      } else {
-        // assemble final prompt from summaries
-        const parts = ['Hier sind die zusammengefassten, frage-relevanten Informationen aus verschiedenen Quellen:'];
-        for (const s of summaries) {
-          parts.push(`- ${s.name}: ${s.summary}`);
-        }
-        parts.push(`\nDie Nutzerfrage lautet: "${question}"\nBeantworte die Frage so präzise wie möglich auf Basis dieser Daten.`);
-        finalPrompt = parts.join('\n');
-      }
-
-      // Send final prompt
-      const finalResp = await sendPrompt(finalPrompt);
+    // If there are no sources, still send the question alone
+    if (sources.length === 0) {
+      const { resp } = await sendSingleSource('Frage', question);
       this.removeTypingIndicator();
-
-      if (!finalResp) {
-        this.addMessage('assistant', 'Error: No response from extension.');
-      } else if (finalResp.success && finalResp.data) {
-        const text = finalResp.data.assembled || finalResp.data.response || finalResp.data.result || JSON.stringify(finalResp.data);
-        this.addMessage('assistant', text);
-      } else {
-        this.addMessage('assistant', `Error: ${finalResp.error || 'Unknown error'}`);
-      }
-
+      const text = resp && resp.success && resp.data ? (resp.data.assembled || resp.data.response || resp.data.result || JSON.stringify(resp.data)) : (resp && resp.error ? `Error: ${resp.error}` : 'No response');
+      this.addResponseSection('Frage', text);
       this.inputField.disabled = false;
       this.isWaitingForResponse = false;
-    } catch (err) {
-      this.removeTypingIndicator();
-      this.addMessage('assistant', `Error: ${err.message}`);
-      this.inputField.disabled = false;
-      this.isWaitingForResponse = false;
+      return;
     }
+
+    // Send each source sequentially (to avoid overwhelming the API)
+    for (const s of sources) {
+      const { resp } = await sendSingleSource(s.name, s.content);
+      this.removeTypingIndicator();
+      let text = '';
+      if (!resp) text = 'Error: No response from extension.';
+      else if (resp.success && resp.data) text = resp.data.assembled || resp.data.response || resp.data.result || JSON.stringify(resp.data);
+      else text = `Error: ${resp.error || 'Unknown error'}`;
+      this.addResponseSection(s.name, text);
+    }
+
+    this.inputField.disabled = false;
+    this.isWaitingForResponse = false;
   }
 
   /**
@@ -844,6 +824,94 @@ class ChatPanel {
 
     // Auto-scroll to bottom
     this.messagesContainer.scrollTop = this.messagesContainer.scrollHeight;
+  }
+
+  /**
+   * Add or update a named response section in the responses container
+   */
+  addResponseSection(name, text) {
+    try {
+      // Prefer existing fixed ids for known sections
+      let bodyId = null;
+      if (name === 'OCR') bodyId = 'response-ocr-body';
+      else if (name === 'Seitentext') bodyId = 'response-alltext-body';
+      else if (name === 'Markierung') bodyId = 'response-selection-body';
+      else if (name === 'Frage') bodyId = 'response-frage-body';
+      // if a mapped element exists, update it
+      if (bodyId) {
+        const bodyEl = document.getElementById(bodyId);
+        if (bodyEl) { bodyEl.textContent = text; return; }
+      }
+      // fallback: create a new section
+      const id = `response-${name.toLowerCase().replace(/[^a-z0-9]+/g,'')}`;
+      bodyId = `${id}-body`;
+      const bodyEl = document.getElementById(bodyId);
+      if (bodyEl) { bodyEl.textContent = text; return; }
+      const responses = document.getElementById('ai-chat-responses');
+      if (!responses) return;
+      const wrap = document.createElement('div');
+      wrap.id = id;
+      wrap.style.marginBottom = '8px';
+      const h = document.createElement('strong');
+      h.textContent = `Antwort auf ${name}:`;
+      const b = document.createElement('div');
+      b.className = 'response-body';
+      b.id = bodyId;
+      b.textContent = text;
+      wrap.appendChild(h);
+      wrap.appendChild(b);
+      responses.appendChild(wrap);
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  /**
+   * Send all sources (markierung, seitentext, ocr) to the model sequentially and display responses
+   */
+  async testAllSources() {
+    if (this.isWaitingForResponse) return;
+    this.showTypingIndicator();
+    this.isWaitingForResponse = true;
+    // collect sources like handleSendMessage
+    let selectionText = '';
+    try { selectionText = window.getSelection().toString() || this.savedSelection || ''; } catch (e) { selectionText = this.savedSelection || ''; }
+    const titleUrl = this.collectTitleAndUrl();
+    const pageTextRes = await this.collectPageText();
+    try { if (this.panelElement) this.panelElement.style.visibility = 'hidden'; } catch (e) {}
+    const ocrRes = await this.collectScreenshotAndOcr();
+    try { if (this.panelElement) this.panelElement.style.visibility = ''; } catch (e) {}
+    const allText = pageTextRes && pageTextRes.text ? pageTextRes.text : '';
+    const ocrText = ocrRes && ocrRes.success ? (ocrRes.ocrText || '') : '';
+
+    const sources = [];
+    if (selectionText && selectionText.trim()) sources.push({ name: 'Markierung', content: selectionText });
+    if (allText && allText.trim()) sources.push({ name: 'Seitentext', content: allText });
+    if (ocrText && ocrText.trim()) sources.push({ name: 'OCR', content: ocrText });
+
+    const sendSingleSource = (name, content) => {
+      return new Promise((resolve) => {
+        const assembledPrompt = `Hinweis: Dies ist der Inhalt der Quelle: ${name}\n\nInhalt:\n${content}`;
+        const payload = { action: 'send-chat-message', assembledPrompt, dataType: 'source', meta: { source: name, raw: content } };
+        try { if (this.debugToggle && this.debugToggle.checked) this.debugLog(`-> [${name}] Request JSON: ${JSON.stringify(payload)}`); } catch (e) {}
+        chrome.runtime.sendMessage(payload, (resp) => {
+          try { if (this.debugToggle && this.debugToggle.checked) this.debugLog(`<- [${name}] Response: ${JSON.stringify(resp)}`); } catch (e) {}
+          resolve({ name, resp });
+        });
+      });
+    };
+
+    for (const s of sources) {
+      const { resp } = await sendSingleSource(s.name, s.content);
+      let text = '';
+      if (!resp) text = 'Error: No response from extension.';
+      else if (resp.success && resp.data) text = resp.data.assembled || resp.data.response || resp.data.result || JSON.stringify(resp.data);
+      else text = `Error: ${resp.error || 'Unknown error'}`;
+      this.addResponseSection(s.name, text);
+    }
+
+    this.removeTypingIndicator();
+    this.isWaitingForResponse = false;
   }
 
   /**
