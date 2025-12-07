@@ -11,6 +11,7 @@ let currentSelectedProfile = null;
 let availableModels = [];
 let ocrUrl = '';
 let ocrOptionsStr = '';
+let exclusionSelectorsStr = '';
 let editingProfileId = null;
 
 /**
@@ -53,6 +54,14 @@ async function init() {
     }
     if (saveOcrBtn) saveOcrBtn.addEventListener('click', saveOcrUrl);
     if (testOcrBtn) testOcrBtn.addEventListener('click', testOcrEndpoint);
+
+    const exclusionTextarea = document.getElementById('exclusion-selectors');
+    const saveExclusionsBtn = document.getElementById('save-exclusions-btn');
+    if (exclusionTextarea) {
+      exclusionTextarea.value = exclusionSelectorsStr || exclusionTextarea.value || '';
+      exclusionTextarea.addEventListener('input', (e) => { exclusionSelectorsStr = e.target.value; runtimeLog('exclusion-selectors changed'); });
+    }
+    if (saveExclusionsBtn) saveExclusionsBtn.addEventListener('click', saveExclusionSelectors);
 
     const exportBtn = document.getElementById('export-profiles-btn');
     const importBtn = document.getElementById('import-profiles-btn');
@@ -112,11 +121,28 @@ async function loadProfiles() {
     // load ocr options
     const r3 = await chrome.storage.sync.get('ocrOptions');
     ocrOptionsStr = r3.ocrOptions || '';
+    const r4 = await chrome.storage.sync.get('exclusionSelectors');
+    exclusionSelectorsStr = r4.exclusionSelectors || '';
+    const exclusionTextarea = document.getElementById('exclusion-selectors');
+    if (exclusionTextarea) exclusionTextarea.value = exclusionSelectorsStr;
     const ocrOptionsTextarea = document.getElementById('ocr-options');
     if (ocrOptionsTextarea) ocrOptionsTextarea.value = ocrOptionsStr;
     runtimeLog('loadProfiles: ocrUrl and ocrOptions loaded from storage');
   } catch (e) {
     console.warn('Failed to load ocrUrl:', e);
+  }
+}
+
+/**
+ * Save exclusion selector list to storage
+ */
+async function saveExclusionSelectors() {
+  try {
+    await chrome.storage.sync.set({ exclusionSelectors: exclusionSelectorsStr });
+    runtimeLog('saveExclusionSelectors: saved exclusion selectors');
+    showStatus('Saved filters');
+  } catch (e) {
+    showError('Failed to save exclusion selectors: ' + (e && e.message ? e.message : String(e)));
   }
 }
 

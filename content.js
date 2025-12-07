@@ -8,12 +8,17 @@
  */
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'extract-all-text') {
-    try {
-      const allText = extractAllVisibleText();
-      sendResponse({ text: allText });
-    } catch (error) {
-      sendResponse({ error: error.message });
-    }
+    // This handler is async because we read filters from storage
+    chrome.storage.sync.get(['exclusionSelectors'], (res) => {
+      try {
+        const exclusionStr = (res && res.exclusionSelectors) ? res.exclusionSelectors : '';
+        const result = extractAllVisibleText(exclusionStr);
+        sendResponse({ text: result.cleanedText, chunks: result.chunks, sentBlocks: result.sentBlocks, sentChars: result.sentChars, excerpts: result.excerpts });
+      } catch (error) {
+        sendResponse({ error: error.message });
+      }
+    });
+    return true; // indicate async response
   } else if (request.action === 'get-selection') {
     const text = window.getSelection().toString();
     sendResponse({ text: text || '', hasSelection: text.length > 0 });
@@ -30,22 +35,76 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
  * @returns {string} All visible text content
  */
 function extractAllVisibleText() {
-  // Create a clone of the body to manipulate
-  const bodyClone = document.body.cloneNode(true);
+  // fallback when called without exclusions: default empty string
+  const exclusionArg = arguments && arguments[0] ? arguments[0] : '';
+  // Parse exclusion selectors (comma or newline separated)
+  const raw = exclusionArg || '';
+  const selectors = raw.split(/[\n,]+/).map(s => s.trim()).filter(s => s.length > 0);
 
-  // Remove script and style elements
-  const scripts = bodyClone.querySelectorAll('script, style, noscript');
-  scripts.forEach(el => el.remove());
+  // Default selectors to exclude
+  const defaultSelectors = ['nav', 'footer', 'aside', 'header', '.sidebar', '.ad', '.ads', '.cookie', '.banner', '.newsletter', '.popup', '.modal', '.social', '.breadcrumb'];
+  const allSelectors = Array.from(new Set(defaultSelectors.concat(selectors)));
 
-  // Get all text content
-  const allText = bodyClone.innerText || bodyClone.textContent || '';
+  // Prefer main > article > body
+  let root = document.querySelector('main') || document.querySelector('article') || document.body;
 
-  // Clean up excessive whitespace
-  return allText
+  // Clone root to avoid modifying page
+  const clone = root.cloneNode(true);
+  // Remove script/style/noscript
+  const bad = clone.querySelectorAll('script, style, noscript');
+  bad.forEach(el => el.remove());
+
+  // Remove elements matching exclusion selectors
+  allSelectors.forEach(sel => {
+    try {
+      // If selector looks like a plain tag (no . or # and is alphabetic), query by tag
+      if (/^[a-zA-Z0-9_-]+$/.test(sel)) {
+        const els = clone.querySelectorAll(sel);
+        els.forEach(e => e.remove());
+      } else {
+        // otherwise use as-is (class/id or complex selector)
+        const els = clone.querySelectorAll(sel);
+        els.forEach(e => e.remove());
+      }
+    } catch (e) {
+      // ignore invalid selectors
+    }
+  });
+
+  // Extract text
+  let allText = clone.innerText || clone.textContent || '';
+  let cleaned = allText
     .split('\n')
     .map(line => line.trim())
     .filter(line => line.length > 0)
     .join('\n');
+
+  // Chunking: max chunk size 2000, max total 5000, send only first 2-3 blocks
+  const maxChunk = 2000;
+  const maxTotal = 5000;
+  const chunks = [];
+  for (let i = 0; i < cleaned.length; i += maxChunk) {
+    chunks.push(cleaned.slice(i, i + maxChunk));
+  }
+  // Determine how many blocks to send (2-3 blocks up to maxTotal)
+  let sentBlocks = Math.min(3, chunks.length);
+  // Ensure total chars <= maxTotal
+  let sentChars = 0;
+  const selectedChunks = [];
+  for (let i = 0; i < sentBlocks; i++) {
+    const remaining = maxTotal - sentChars;
+    if (remaining <= 0) break;
+    const take = Math.min(chunks[i].length, remaining);
+    selectedChunks.push(chunks[i].slice(0, take));
+    sentChars += take;
+  }
+  // adjust sentBlocks to actual selected
+  sentBlocks = selectedChunks.length;
+
+  // excerpts: short preview of each selected chunk
+  const excerpts = selectedChunks.map(c => c.substring(0, Math.min(200, c.length)));
+
+  return { cleanedText: cleaned, chunks: selectedChunks, sentBlocks, sentChars, excerpts };
 }
 
 /**

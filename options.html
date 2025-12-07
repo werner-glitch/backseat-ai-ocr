@@ -111,6 +111,12 @@
                     <button id="test-ocr-btn" class="btn btn-secondary">Test OCR Endpoint</button>
                 </div>
             </div>
+                <div class="form-group">
+                    <label for="exclusion-selectors">Zu ignorierende DOM-Elemente für Text-Extraktion</label>
+                    <textarea id="exclusion-selectors" class="form-input" rows="4" placeholder="z.B.: nav,footer,aside,.sidebar,.ad,.cookie,.banner,.newsletter,.popup,.modal,.social,.breadcrumb"></textarea>
+                    <p class="help-text">Trage hier Tags, Klassen oder IDs ein, die beim Text-Extrahieren ausgeschlossen werden (Komma- oder zeilengetrennt).</p>
+                    <div class="button-row"><button id="save-exclusions-btn" class="btn btn-primary">Save Filters</button></div>
+                </div>
             <p>The extension sends data in the following JSON format:</p>
             <pre><code>{
   "type": "selected_text|all_text|screenshot",

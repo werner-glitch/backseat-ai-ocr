@@ -759,20 +759,24 @@ class ChatPanel {
   collectPageText(forceRefresh = false) {
     return new Promise((resolve) => {
       try {
-        // Extract visible text directly
-        const bodyClone = document.body.cloneNode(true);
-        const scripts = bodyClone.querySelectorAll('script, style, noscript');
-        scripts.forEach(el => el.remove());
-        const allText = bodyClone.innerText || bodyClone.textContent || '';
-        const cleaned = allText
-          .split('\n')
-          .map(line => line.trim())
-          .filter(line => line.length > 0)
-          .join('\n');
-        const preview = cleaned ? cleaned.substring(0, 200) : '';
-        const elem = document.getElementById('preview-alltext');
-        if (elem) elem.textContent = `Gesamter Seitentext: ${preview}${cleaned && cleaned.length > 200 ? '...' : ''}`;
-        resolve({ text: cleaned });
+        chrome.runtime.sendMessage({ action: 'extract-all-text' }, (response) => {
+          if (!response) { const elem = document.getElementById('preview-alltext'); if (elem) elem.textContent = `Gesamter Seitentext: nicht verfügbar`; resolve({ text: '' }); return; }
+          if (response.error) { const elem = document.getElementById('preview-alltext'); if (elem) elem.textContent = `Gesamter Seitentext: nicht verfügbar`; resolve({ text: '' }); return; }
+          // response: { text, chunks, sentBlocks, sentChars, excerpts }
+          const cleaned = response.text || '';
+          const preview = cleaned ? cleaned.substring(0, 200) : '';
+          const elem = document.getElementById('preview-alltext');
+          if (elem) elem.textContent = `Gesamter Seitentext: ${preview}${cleaned && cleaned.length > 200 ? '...' : ''}`;
+          // If debug enabled, show how many chars/blocks were sent and excerpts
+          try {
+            if (this.debugToggle && this.debugToggle.checked) {
+              const dbg = `SentBlocks=${response.sentBlocks || 0}, SentChars=${response.sentChars || 0}`;
+              this.debugLog(dbg);
+              if (Array.isArray(response.excerpts)) response.excerpts.forEach((ex, i) => this.debugLog(`Block ${i+1} excerpt: ${ex}`));
+            }
+          } catch (e) {}
+          resolve({ text: cleaned, chunks: response.chunks || [], sentBlocks: response.sentBlocks || 0, sentChars: response.sentChars || 0 });
+        });
       } catch (e) {
         const elem = document.getElementById('preview-alltext');
         if (elem) elem.textContent = `Gesamter Seitentext: nicht verfügbar`;
