@@ -81,11 +81,15 @@ class ChatPanel {
             <h3 style="margin:0;">Chat with AI</h3>
             <select id="ai-chat-profile-select" style="font-size:12px;padding:4px;border-radius:6px;border:1px solid #ccc;"></select>
           </div>
-          <button id="ai-chat-toggle" class="ai-chat-toggle-btn" title="Toggle chat panel">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <div id="ai-chat-active-prompt" style="font-size:12px;color:#333;padding:6px 8px;border-radius:8px;background:#f3f3f3;max-width:360px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Prompt: -</div>
+            <div id="ai-chat-active-ocr" style="font-size:12px;color:#333;padding:6px 8px;border-radius:8px;background:#f3f3f3;">OCR: -</div>
+            <button id="ai-chat-toggle" class="ai-chat-toggle-btn" title="Toggle chat panel">
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
               <path d="M2 18l1.41-5.02C2.24 11.36 2 10.7 2 10c0-4.42 3.58-8 8-8s8 3.58 8 8-3.58 8-8 8c-1.28 0-2.5-.32-3.56-.93L2 18z" fill="currentColor"/>
             </svg>
-          </button>
+            </button>
+          </div>
         </div>
         <div class="ai-chat-messages" id="ai-chat-messages"></div>
         <div id="ai-chat-preview" class="ai-chat-preview" style="padding:8px;border-top:1px solid #eee;font-size:12px;max-height:150px;overflow:auto;">
@@ -110,9 +114,14 @@ class ChatPanel {
             </svg>
           </button>
           <!-- Screenshot button removed; Send will collect screenshot/OCR automatically -->
+          <label style="display:flex;align-items:center;gap:6px;margin-left:8px;font-size:12px;color:#444;"><input id="ai-chat-debug-toggle" type="checkbox" style="margin-right:6px;">Debug</label>
         </div>
         <div class="ai-chat-footer">
           <small>Configured API</small>
+        </div>
+        <div id="ai-chat-debug-log-wrap" style="display:none;padding:8px;border-top:1px solid #eee;background:#111;color:#0f0;max-height:160px;overflow:auto;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><strong style="color:#fff;font-size:13px;">Debug Log</strong><button id="ai-chat-clear-log" style="font-size:12px;padding:4px 8px;border-radius:6px;">Clear</button></div>
+          <pre id="ai-chat-debug-log" style="white-space:pre-wrap;font-size:12px;margin:0;padding:0;color:#0f0;background:transparent;"> </pre>
         </div>
       </div>
     `;
@@ -121,6 +130,11 @@ class ChatPanel {
     this.panelElement = document.getElementById('ai-chat-panel');
     this.messagesContainer = document.getElementById('ai-chat-messages');
     this.inputField = document.getElementById('ai-chat-input');
+    this.debugLogEl = document.getElementById('ai-chat-debug-log');
+    this.debugWrap = document.getElementById('ai-chat-debug-log-wrap');
+    this.debugToggle = document.getElementById('ai-chat-debug-toggle');
+    const clearLogBtn = document.getElementById('ai-chat-clear-log');
+    if (clearLogBtn) clearLogBtn.addEventListener('click', () => { if (this.debugLogEl) this.debugLogEl.textContent = ''; });
   }
 
   /**
@@ -142,6 +156,23 @@ class ChatPanel {
     document.getElementById('ai-chat-send-btn').addEventListener('click', () => {
       this.handleSendMessage();
     });
+
+    // Debug toggle behaviour and console hook
+    if (this.debugToggle) {
+      // initialize from storage
+      try { chrome.storage.sync.get(['panelDebug'], (res) => {
+        const enabled = !!res.panelDebug;
+        this.debugToggle.checked = enabled;
+        this.debugWrap.style.display = enabled ? 'block' : 'none';
+        if (enabled) this.enableConsoleProxy(); else this.disableConsoleProxy();
+      }); } catch (e) {}
+
+      this.debugToggle.addEventListener('change', (e) => {
+        const on = e.target.checked;
+        try { chrome.storage.sync.set({ panelDebug: on }); } catch (err) {}
+        if (on) { this.debugWrap.style.display = 'block'; this.enableConsoleProxy(); } else { this.debugWrap.style.display = 'none'; this.disableConsoleProxy(); }
+      });
+    }
 
     // Enter key to send
     this.inputField.addEventListener('keypress', (e) => {
@@ -846,6 +877,67 @@ class ChatPanel {
     if (indicator) {
       indicator.remove();
     }
+  }
+
+  /**
+   * Append a message to the debug log (if available)
+   */
+  debugLog(msg) {
+    try {
+      if (!this.debugLogEl) return;
+      const now = new Date().toLocaleTimeString();
+      this.debugLogEl.textContent += `[${now}] ${msg}\n`;
+      const wrap = this.debugLogEl.parentElement;
+      if (wrap) wrap.scrollTop = wrap.scrollHeight;
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  /**
+   * Replace console methods with proxies that also write to the panel debug log
+   */
+  enableConsoleProxy() {
+    if (this._consoleProxyEnabled) return;
+    this._origConsole = this._origConsole || {
+      log: console.log.bind(console),
+      error: console.error.bind(console),
+      warn: console.warn.bind(console),
+      info: console.info.bind(console),
+      debug: console.debug ? console.debug.bind(console) : console.log.bind(console)
+    };
+    const levels = ['log', 'error', 'warn', 'info', 'debug'];
+    levels.forEach((lvl) => {
+      try {
+        console[lvl] = (...args) => {
+          try { this._origConsole[lvl](...args); } catch (e) {}
+          try {
+            const s = args.map(a => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
+            this.debugLog(`[${lvl}] ${s}`);
+          } catch (e) {}
+        };
+      } catch (e) {}
+    });
+    this._consoleProxyEnabled = true;
+    this.debugLog('Console proxy enabled');
+  }
+
+  /**
+   * Restore original console methods
+   */
+  disableConsoleProxy() {
+    if (!this._consoleProxyEnabled) return;
+    try {
+      if (this._origConsole) {
+        console.log = this._origConsole.log;
+        console.error = this._origConsole.error;
+        console.warn = this._origConsole.warn;
+        console.info = this._origConsole.info;
+        console.debug = this._origConsole.debug || this._origConsole.log;
+      }
+    } catch (e) {}
+    this._consoleProxyEnabled = false;
+    this.debugLog('Console proxy disabled');
   }
 }
 

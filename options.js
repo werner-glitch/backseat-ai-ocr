@@ -138,6 +138,7 @@ async function saveProfiles() {
 async function addProfile() {
   const profileName = document.getElementById('profile-name').value.trim();
   const profileUrl = document.getElementById('profile-url').value.trim();
+  const profileOcrUrl = (document.getElementById('profile-ocr-url') && document.getElementById('profile-ocr-url').value.trim()) || '';
   const systemPrompt = document.getElementById('profile-system-prompt').value.trim();
   runtimeLog(`addProfile: attempt name='${profileName}' url='${profileUrl}'`);
 
@@ -170,6 +171,7 @@ async function addProfile() {
         profiles[idx].name = profileName;
         profiles[idx].url = normalizedUrl;
         profiles[idx].systemPrompt = systemPrompt || '';
+        profiles[idx].ocrUrl = profileOcrUrl || '';
         profiles[idx].updatedAt = new Date().toISOString();
       }
       editingProfileId = null;
@@ -188,6 +190,7 @@ async function addProfile() {
         url: normalizedUrl,
         models: [],
         systemPrompt: systemPrompt || '',
+        ocrUrl: profileOcrUrl || '',
         createdAt: new Date().toISOString()
       };
 
@@ -220,6 +223,8 @@ function editProfile(profileId) {
   document.getElementById('profile-name').value = prof.name || '';
   document.getElementById('profile-url').value = prof.url || '';
   document.getElementById('profile-system-prompt').value = prof.systemPrompt || '';
+  const ocrField = document.getElementById('profile-ocr-url');
+  if (ocrField) ocrField.value = prof.ocrUrl || '';
   editingProfileId = prof.id;
   document.getElementById('add-profile-btn').textContent = 'Save Profile';
 }
@@ -278,6 +283,7 @@ function renderProfiles() {
       <div class="profile-info">
         <div class="profile-name">${escapeHtml(profile.name)}</div>
         <div class="profile-url">${escapeHtml(profile.url)}</div>
+        <div class="profile-ocr">OCR: ${escapeHtml(profile.ocrUrl || '')}</div>
         <div class="profile-status">${statusText}</div>
       </div>
       <div class="profile-actions">
@@ -343,7 +349,8 @@ function handleImportFile(e) {
           name: p.name.trim(),
           url: (p.url||'').trim(),
           models: p.models || [],
-          systemPrompt: p.systemPrompt || '',
+            systemPrompt: p.systemPrompt || '',
+            ocrUrl: p.ocrUrl || '',
           createdAt: new Date().toISOString()
         };
         profiles.push(newP);
